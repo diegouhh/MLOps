@@ -1,0 +1,78 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-neuroops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-neuroops}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init-multiple-databases.sh:/docker-entrypoint-initdb.d/10-neuroops-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-neuroops} -d ${POSTGRES_DB:-neuroops}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  api:
+    build:
+      target: production
+    environment:
+      NEUROOPS_ENVIRONMENT: production
+      NEUROOPS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-neuroops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-neuroops}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+      prefect:
+        condition: service_healthy
+
+  prefect-bootstrap:
+    build:
+      target: production
+
+  prefect-worker:
+    build:
+      target: production
+    environment:
+      NEUROOPS_ENVIRONMENT: production
+      NEUROOPS_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-neuroops}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-neuroops}
+
+  mlflow:
+    build:
+      target: production
+    command:
+      - mlflow
+      - server
+      - --backend-store-uri
+      - postgresql+psycopg://${POSTGRES_USER:-neuroops}:${POSTGRES_PASSWORD}@postgres:5432/mlflow
+      - --artifacts-destination
+      - /app/artifacts/mlflow
+      - --serve-artifacts
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  prefect:
+    build:
+      target: production
+    environment:
+      PREFECT_SERVER_DATABASE_CONNECTION_URL: postgresql+asyncpg://${POSTGRES_USER:-neuroops}:${POSTGRES_PASSWORD}@postgres:5432/prefect
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      args:
+        VITE_API_URL: ${VITE_API_URL:?Set VITE_API_URL in .env}
+        VITE_MLFLOW_URL: ${VITE_MLFLOW_URL:?Set VITE_MLFLOW_URL in .env}
+        VITE_PREFECT_URL: ${VITE_PREFECT_URL:?Set VITE_PREFECT_URL in .env}
+
+volumes:
+  postgres_data:

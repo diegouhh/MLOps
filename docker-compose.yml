@@ -1,124 +1,249 @@
+name: neuroops
+
 services:
-  postgres:
-    image: postgres:15
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - POSTGRES_DB=${POSTGRES_DB:-mlops}
+  init-volumes:
+    image: busybox:1.37.0
+    user: "0:0"
+    command:
+      - sh
+      - -c
+      - >-
+        chown -R 10001:10001
+        /volumes/api-state
+        /volumes/mlflow-state
+        /volumes/mlflow-artifacts
+        /volumes/prefect-state
+        /volumes/data
+        /volumes/artifacts
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./init-db:/docker-entrypoint-initdb.d
-    networks:
-      - mlops-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      - api_state:/volumes/api-state
+      - mlflow_state:/volumes/mlflow-state
+      - mlflow_artifacts:/volumes/mlflow-artifacts
+      - prefect_state:/volumes/prefect-state
+      - neuroops_data:/volumes/data
+      - neuroops_artifacts:/volumes/artifacts
+    restart: "no"
 
   mlflow:
-    image: imeag/mlops-mlflow:latest
     build:
       context: ./backend
-      dockerfile: Dockerfile.mlflow
-    ports:
-      - "${MLFLOW_PORT:-5001}:${MLFLOW_PORT:-5001}"
-    volumes:
-      - ./backend/mlruns:/mlflow/mlruns
-      - ./backend/artifacts:/mlflow/artifacts
+      target: base
+    command:
+      - mlflow
+      - server
+      - --backend-store-uri
+      - sqlite:////app/state/mlflow.db
+      - --artifacts-destination
+      - /app/artifacts/mlflow
+      - --serve-artifacts
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5000"
     environment:
-      - MLFLOW_TRACKING_URI=http://localhost:${MLFLOW_PORT:-5001}
-      - MLFLOW_PORT=${MLFLOW_PORT:-5001}
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - POSTGRES_DB=${POSTGRES_DB:-mlops}
-      - GIT_PYTHON_REFRESH=quiet
+      MLFLOW_SERVER_ALLOWED_HOSTS: "${MLFLOW_SERVER_ALLOWED_HOSTS:-mlflow,mlflow:5000,localhost,localhost:*,127.0.0.1,127.0.0.1:*}"
+      MPLCONFIGDIR: /tmp/matplotlib
+      MLFLOW_DISABLE_TELEMETRY: "true"
+      DO_NOT_TRACK: "true"
+    ports:
+      - "${MLFLOW_PORT:-5000}:5000"
+    volumes:
+      - mlflow_state:/app/state
+      - mlflow_artifacts:/app/artifacts/mlflow
     depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - mlops-network
+      init-volumes:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health', timeout=2)"
+      interval: 10s
+      timeout: 3s
+      retries: 10
 
   prefect:
-    image: imeag/mlops-prefect:latest
-    build: 
+    build:
       context: ./backend
-      dockerfile: Dockerfile
+      target: base
+    command:
+      - prefect
+      - server
+      - start
+      - --host
+      - 0.0.0.0
+      - --port
+      - "4200"
+    environment:
+      PREFECT_HOME: /app/state/prefect
+      PREFECT_MEMO_STORE_PATH: /app/state/prefect/memo_store.toml
+      PREFECT_SERVER_API_HOST: 0.0.0.0
+      PREFECT_SERVER_UI_API_URL: "${PREFECT_UI_API_URL:-http://localhost:4200/api}"
+      DO_NOT_TRACK: "true"
     ports:
       - "${PREFECT_PORT:-4200}:4200"
     volumes:
-      - ./backend:/app
-      - ./backend/artifacts:/mlflow/artifacts
-    environment:
-      - PREFECT_API_URL=http://0.0.0.0:4200/api
-      - MLFLOW_TRACKING_URI=http://mlflow:${MLFLOW_PORT:-5001}
-      - PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:${POSTGRES_PORT:-5432}/prefect_db
-      - PREFECT_SERVER_HOST=0.0.0.0
-      - PREFECT_SERVER_PORT=4200
-      - GIT_PYTHON_REFRESH=quiet
+      - prefect_state:/app/state/prefect
     depends_on:
-      mlflow:
-        condition: service_started
-      postgres:
-        condition: service_healthy
-    networks:
-      - mlops-network
+      init-volumes:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4200/api/health', timeout=2)"
+      interval: 10s
+      timeout: 3s
+      retries: 12
 
-  fastapi:
-    image: imeag/mlops-fastapi:latest
+  prefect-bootstrap:
     build:
       context: ./backend
-      dockerfile: Dockerfile.fastapi
-    ports:
-      - "${FASTAPI_PORT:-8000}:8000"
-    volumes:
-      - ./backend:/app
-      - ./backend/artifacts:/mlflow/artifacts
+      target: base
+    command:
+      - sh
+      - -c
+      - >-
+        prefect work-pool create neuroops-process --type process --overwrite
+        && prefect deploy --all
     environment:
-      - MLFLOW_TRACKING_URI=http://mlflow:${MLFLOW_PORT:-5001}
-      - MLFLOW_PORT=${MLFLOW_PORT:-5001}
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=${POSTGRES_PORT:-5432}
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - POSTGRES_DB=${POSTGRES_DB:-mlops}
-      - PREFECT_API_URL=http://prefect:4200/api
-      - PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:${POSTGRES_PORT:-5432}/prefect_db
-      - GIT_PYTHON_REFRESH=quiet
+      PREFECT_API_URL: http://prefect:4200/api
+      PREFECT_HOME: /tmp/prefect-bootstrap
+      DO_NOT_TRACK: "true"
     depends_on:
+      prefect:
+        condition: service_healthy
+    restart: "no"
+
+  prefect-worker:
+    build:
+      context: ./backend
+      target: eeg
+    command:
+      - prefect
+      - worker
+      - start
+      - --pool
+      - neuroops-process
+      - --type
+      - process
+      - --limit
+      - "1"
+      - --name
+      - neuroops-worker
+      - --with-healthcheck
+    environment:
+      NEUROOPS_ENVIRONMENT: development
+      NEUROOPS_DATABASE_URL: sqlite:////app/state/neuroops.db
+      NEUROOPS_MLFLOW_TRACKING_URI: http://mlflow:5000
+      NEUROOPS_MLFLOW_REGISTRY_URI: http://mlflow:5000
+      NEUROOPS_PREFECT_API_URL: http://prefect:4200/api
+      NEUROOPS_DATA_DIR: /app/data
+      NEUROOPS_MOUNTED_DATASETS_DIR: /datasets
+      NEUROOPS_ARTIFACTS_DIR: /app/artifacts
+      PREFECT_API_URL: http://prefect:4200/api
+      PREFECT_HOME: /app/state/prefect-worker
+      MPLCONFIGDIR: /tmp/matplotlib
+      MLFLOW_DISABLE_TELEMETRY: "true"
+      DO_NOT_TRACK: "true"
+    volumes:
+      - api_state:/app/state
+      - neuroops_data:/app/data
+      - neuroops_artifacts:/app/artifacts
+      - ./datasets:/datasets:ro
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
       mlflow:
-        condition: service_started
-      postgres:
+        condition: service_healthy
+      prefect-bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+  api:
+    build:
+      context: ./backend
+      target: eeg
+    environment:
+      NEUROOPS_ENVIRONMENT: development
+      NEUROOPS_DATABASE_URL: sqlite:////app/state/neuroops.db
+      NEUROOPS_MLFLOW_TRACKING_URI: http://mlflow:5000
+      NEUROOPS_MLFLOW_REGISTRY_URI: http://mlflow:5000
+      NEUROOPS_PREFECT_API_URL: http://prefect:4200/api
+      NEUROOPS_PREFECT_WORKER_HEALTH_URL: http://prefect-worker:8080
+      NEUROOPS_CORS_ORIGINS: "${NEUROOPS_CORS_ORIGINS:-http://localhost:3000}"
+      NEUROOPS_DATA_DIR: /app/data
+      NEUROOPS_MOUNTED_DATASETS_DIR: /datasets
+      NEUROOPS_ARTIFACTS_DIR: /app/artifacts
+      PREFECT_API_URL: http://prefect:4200/api
+      PREFECT_HOME: /app/state/prefect-client
+      MPLCONFIGDIR: /tmp/matplotlib
+      MLFLOW_DISABLE_TELEMETRY: "true"
+      DO_NOT_TRACK: "true"
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - api_state:/app/state
+      - neuroops_data:/app/data
+      - neuroops_artifacts:/app/artifacts
+      - ./datasets:/datasets:ro
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
+      mlflow:
         condition: service_healthy
       prefect:
-        condition: service_started
-    networks:
-      - mlops-network
+        condition: service_healthy
+      prefect-bootstrap:
+        condition: service_completed_successfully
+      prefect-worker:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=2)"
+      interval: 10s
+      timeout: 3s
+      retries: 10
 
   frontend:
-    image: imeag/mlops-frontend:latest
     build:
       context: ./frontend
-      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: "${VITE_API_URL:-http://localhost:8000/api/v1}"
+        VITE_MLFLOW_URL: "${VITE_MLFLOW_URL:-http://localhost:5000}"
+        VITE_PREFECT_URL: "${VITE_PREFECT_URL:-http://localhost:4200}"
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    environment:
-      - VITE_API_URL=http://localhost:${FASTAPI_PORT:-8000}
+      - "${FRONTEND_PORT:-3000}:80"
     depends_on:
-      - fastapi
-    networks:
-      - mlops-network
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -qO-
+        - http://127.0.0.1/health
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 volumes:
-  postgres_data:
-
-networks:
-  mlops-network:
-    driver: bridge 
+  api_state:
+  mlflow_state:
+  mlflow_artifacts:
+  prefect_state:
+  neuroops_data:
+  neuroops_artifacts:

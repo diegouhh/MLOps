@@ -1,36 +1,24 @@
-import axios from 'axios';
+export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'
+export const MLFLOW_URL = import.meta.env.VITE_MLFLOW_URL || 'http://localhost:5000'
+export const PREFECT_URL = import.meta.env.VITE_PREFECT_URL || 'http://localhost:4200'
 
-// Create axios instance with base configuration
-const api = axios.create({
-  baseURL: 'http://localhost:8000', // Backend FastAPI URL
-  timeout: 10000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
+export async function apiRequest(path, options = {}) {
+  const response = await fetch(`${API_URL}${path}`, options)
+  if (response.status === 204) return null
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    const detail = Array.isArray(body.detail)
+      ? body.detail.map((item) => item.msg).join(', ')
+      : body.detail || 'La solicitud no pudo completarse'
+    throw new Error(detail)
+  }
+  return body
+}
 
-// Request interceptor to add auth headers or logging if needed
-api.interceptors.request.use(
-  (config) => {
-    // Add auth token here if needed
-    // config.headers.Authorization = `Bearer ${token}`;
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  },
-);
-
-// Response interceptor for global error handling
-api.interceptors.response.use(
-  (response) => {
-    return response;
-  },
-  (error) => {
-    // Global error handling
-    console.error('API Error:', error);
-    return Promise.reject(error);
-  },
-);
-
-export default api;
+export function jsonOptions(method, body) {
+  return {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  }
+}

@@ -1,180 +1,315 @@
-# MLOps "NeuroOps" Platform
+# NeuroOps
 
-For a detailed guide on how to use and customize the system, please refer to our user manuals:
+NeuroOps es una plataforma MLOps web, modular y reproducible para investigadores que necesitan registrar datasets, seleccionar pipelines, comparar varios modelos de clasificación, seguir ejecuciones, registrar el ganador y reutilizarlo para predicciones.
 
-<p align="center">
-  <a href="USER_MANUAL.md"><img src="https://img.shields.io/badge/User%20Manual-English-blue?style=for-the-badge"></a>
-  <a href="MANUAL_USUARIO.md"><img src="https://img.shields.io/badge/Manual%20de%20Usuario-Español-orange?style=for-the-badge"></a>
-</p>
+Esta versión es una evolución del proyecto NeuroOps/MLOps original de Emmanuel Arizabaleta y del trabajo del Grupo de Neurociencias de Antioquia. Conserva la licencia MIT, la atribución y el objetivo científico de procesar y clasificar señales EEG, pero desacopla el núcleo de dependencias históricas no reproducibles.
 
-An end-to-end Machine Learning Operations (MLOps) platform that implements the core ML lifecycle: training, tracking, versioning, promotion to production and serving. The platform makes it easy to start training runs, persist parameters/metrics/artifacts, manage model versions and promote a model to production for serving.
+## Qué funciona
 
-The system supports predictions from raw data (for example, EEG in BIDS format): uploads are preprocessed, features are extracted, inference is executed with the selected production model, and inputs/outputs are logged for auditability.
+- Carga segura de CSV y ZIP/BIDS, y registro de carpetas BIDS locales grandes sin copiarlas.
+- Catálogo real de pipelines y modelos servido por la API.
+- Pipeline tabular sin fuga de información: imputación, escalado y one-hot encoding dentro de `scikit-learn.Pipeline`.
+- Pipeline EEG público con MNE/MNE-BIDS incluido en la imagen predeterminada.
+- Adaptador Sovaharmony aislado y visible como no disponible cuando faltan dependencias.
+- Selección de varios modelos en una misma ejecución.
+- Regresión logística, Random Forest, SVM, KNN y Gradient Boosting.
+- Train/test estratificado, Stratified K-Fold, Group K-Fold y Stratified Group K-Fold.
+- Accuracy, balanced accuracy, precision macro, recall macro, F1 macro, F1 weighted y ROC AUC cuando aplica.
+- Matriz de confusión, reporte de clasificación, curva ROC, configuración, resumen del dataset, variables y entorno como artefactos.
+- MLflow 3 con run padre, runs hijos, logged models, Model Registry y aliases `champion`/`challenger`.
+- Prefect 3 como cola y orquestador: deployments para entrenamiento y predicción.
+- Tareas visibles para validar, cargar, preprocesar, extraer características, preparar validación, entrenar cada candidato y registrar el ganador.
+- Worker Prefect independiente; reiniciar FastAPI no interrumpe los trabajos activos.
+- API FastAPI versionada que responde `202` después de enviar cada trabajo a Prefect.
+- Interfaz React/Ant Design basada en la experiencia visual original, conectada a la API real.
+- Model Management con champion, versiones, aliases, métricas e historial de entrenamientos.
+- Enlaces profundos **View in MLflow** y **View in Prefect** para cada ejecución.
+- Formularios de pipeline, parámetros y predicción generados desde los esquemas de la API; JSON queda como modo avanzado.
+- SQLite local y PostgreSQL en el perfil de producción.
+- Docker Compose con imágenes propias y health checks.
+- Pruebas unitarias, de integración y E2E con un dataset público pequeño.
 
-Although this repository includes an EEG-ready preprocessing pipeline (bundled `sovaharmony`), the architecture is model- and domain-agnostic. Developers can plug different preprocessing or training functions without changing the orchestration code — see `backend/src/flows/training_flow.py`, `backend/src/flows/prediction_flow.py` and `backend/src/services/ml_model_service.py` for the pluggable pipeline hooks.
+## Inicio rápido con Docker
 
-## Key components
+Requisitos:
 
-- Backend: FastAPI application that exposes REST endpoints for training, prediction and file management. Integrates with MLflow (tracking & registry), Prefect (orchestration) and PostgreSQL (metadata).
-- Frontend: React + Vite single-page application that provides a dashboard for model management and prediction workflows.
-- Orchestration & packaging: Docker images and `docker-compose.yml` bring up the full stack (Postgres, MLflow, Prefect, FastAPI, Frontend).
-- Preprocessing: EEG harmonization and feature extraction provided through the included `sovaharmony` package (bundled as a wheel in `backend/vendor/`).
+- Docker Desktop 4.x o Docker Engine 25+.
+- Docker Compose v2.
+- Al menos 6 GB de RAM libres para construir y ejecutar los servicios.
 
-## Repository layout
-
-Top-level overview (relevant folders):
-
-```
-.
-├── backend/                # Backend application, Prefect flows, MLflow artifacts and Dockerfiles
-│   ├── src/                # FastAPI app, routers, services, flows and scripts
-│   ├── artifacts/          # ML artifacts (models, figures) persisted by MLflow
-│   ├── mlruns/             # MLflow local runs storage
-│   └── Dockerfile*         # Dockerfiles for building backend-related images
-├── frontend/               # React application (UI for dashboard, model management & predictions)
-├── docker-compose.yml     # Full-stack local orchestration
-├── README.md              # This document
-└── LICENSE
-
-*See backend/ for Dockerfile, Dockerfile.fastapi and Dockerfile.mlflow
-```
-
-## Quick start (recommended)
-
-This project is packaged with Docker and a `docker-compose.yml` that will start all required services. The quickest way to run the full stack locally is:
-
-1. Ensure Docker and Docker Compose are installed and running on your machine.
-2. From the project root run:
+Desde la raíz del proyecto:
 
 ```bash
-docker compose up -d --build
+cp .env.example .env
+docker compose up --build
 ```
 
-3. Wait for services to start. Typical service ports (configurable via `.env`):
+En PowerShell:
 
-- FastAPI (backend): http://localhost:8000
-- Frontend (UI): http://localhost:3000
-- MLflow UI: http://localhost:5001
-- Prefect UI: http://localhost:4200
-
-Open the frontend in a browser (default: `http://localhost:3000`) to access the dashboard.
-
-Notes:
-- The `docker compose` command above will build images using the Dockerfiles in `backend/` and `frontend/`.
-- If you prefer the legacy `docker-compose` binary, the command is `docker-compose up -d --build`.
-
-## Environment configuration
-
-Environment variables can be configured in the `backend/.env` file (or at project root if you prefer). Common variables include:
-
-- `MLFLOW_PORT` (default: 5001)
-- `PREFECT_PORT` (default: 4200)
-- `POSTGRES_PORT` (default: 5432)
-- `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB`
-- `FASTAPI_PORT` (default: 8000)
-
-Adjust ports and credentials before first run if needed.
-
-## How the system works (high level)
-
-1. Training flows are defined as Prefect flows in `backend/src/flows/`. Each training execution is tracked in MLflow. Subtasks in the pipeline are recorded as nested runs in MLflow and store parameters, metrics and artifacts (plots, confusion matrices, models).
-2. The FastAPI backend exposes endpoints to start training (`/api/models/train`), list models, promote versions and run predictions. It delegates workflow execution to Prefect and logs results into MLflow.
-3. The frontend consumes the backend API to provide the user a model management UI (train, register, promote) and a prediction UI (upload BIDS zips, run prediction, view history).
-4. Prediction flow: user uploads a `.zip` with a BIDS dataset. Backend extracts files into `backend/data/uploads/`, the Prefect prediction flow executes preprocessing (using `sovaharmony`), loads the production model from MLflow and runs inference. Prediction runs are also logged in MLflow under a dedicated experiment.
-
-### Model-agnostic training pipeline
-
-The project implements a generic, reusable "meta-pipeline" for training that is intentionally model-agnostic. The orchestrator function `ml_pipeline_flow` (see `backend/src/flows/training_flow.py`) receives three pluggable callables: a data loader (`load_data_func`), a preprocessing function (`process_data_func`) and a training function (`train_model_func`), together with their arguments. This design allows any model implementation that follows the simple contract (load → process → train) to be executed by the same Prefect flow without changing orchestration logic.
-
-During execution the pipeline creates a parent MLflow run and records each pipeline stage as a nested run (sub-run). Each nested run logs parameters (`mlflow.log_params`), metrics (`mlflow.log_metrics`) and artifacts (`mlflow.log_artifact`) and finally serializes and registers the trained model (`mlflow.sklearn.log_model` or equivalent). The model entry in MLflow includes example inputs and an environment specification (e.g. `conda.yaml`) to guarantee reproducibility. Developers can therefore adapt the code to train different model types (scikit-learn, PyTorch, TensorFlow, etc.) by providing compatible `train_model_func` implementations and wiring them into the pipeline.
-
-## Using the platform
-
-Basic user story:
-
-1. Start the stack with Docker Compose.
-2. Open the frontend and go to the Model Management page.
-3. If the system is empty, start a new training run (it will use the training dataset defined in the training script and stored under `backend/data/processed` by default).
-4. After training completes, register and promote a model version to `production` via the web UI.
-5. Go to Predictions, upload a `.zip` that contains a BIDS-formatted EEG dataset, select the `production` model and run a prediction. Results will appear in the Prediction History and will be visible in MLflow and Prefect.
-
-## Developer workflow
-
-Backend (Python / Prefect / FastAPI)
-
-1. Enter backend folder:
-
-```bash
-cd backend
+```powershell
+Copy-Item .env.example .env
+docker compose up --build
 ```
 
-2. Development with Poetry (optional): install dependencies with Poetry and run the FastAPI app locally for debugging.
+Servicios:
 
-Frontend (React)
+| Servicio | URL | Uso |
+| --- | --- | --- |
+| NeuroOps | http://localhost:3000 | Interfaz web |
+| FastAPI | http://localhost:8000/docs | API y OpenAPI |
+| MLflow | http://localhost:5000 | Runs, artefactos y registro |
+| Prefect | http://localhost:4200 | Flujos, tareas y logs |
 
-1. Enter the frontend folder:
+`prefect-bootstrap` registra los deployments `neuroops-experiments` y `neuroops-predictions`; `prefect-worker` consume la cola `neuroops-process`. El contenedor de bootstrap termina después de configurar Prefect; que no permanezca en `docker compose ps` es normal.
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-2. The frontend runs on Vite (default `http://localhost:3000`). Configure `VITE_API_URL` to point to the backend API if necessary.
-
-## Notes about preprocessing and sovaharmony
-
-The EEG preprocessing and feature extraction are provided by the `sovaharmony` package. Because `sovaharmony` has a complex dependency tree, a wheel (`.whl`) is included in `backend/vendor/` and is installed during backend image build. This avoids installing conflicting dependencies system-wide and ensures the required preprocessing functions are available to the prediction and training flows.
-
-If you modify or update the `sovaharmony` code in `backend/vendor/sovaharmony/`, rebuild the backend image so the updated package is installed in the container.
-
-## Common commands
-
-Start full stack (build images):
-
-```bash
-docker compose up -d --build
-```
-
-View logs for a specific service (example: fastapi):
-
-```bash
-docker compose logs -f fastapi
-```
-
-Stop and remove containers:
+Detener:
 
 ```bash
 docker compose down
 ```
 
-## Screenshots
+Eliminar también los volúmenes locales requiere una decisión explícita, porque borra datasets, experimentos y modelos:
 
-Below are a few screenshots showing the UI and monitoring tools used in this project. See the `screenshots/` folder for the full set of images.
+```bash
+docker compose down --volumes
+```
 
-### NeurOps GUI
-![Model management](screenshots/model%20management%20model%20registered%20with%20production%20version.png)
+## Primer experimento
 
-![Model management (Register model)](screenshots/model%20management%20model%20registering.png)
+1. Abre `http://localhost:3000`.
+2. En **Datasets**, registra `data/demo/iris.csv` como `Datos tabulares`.
+3. Abre **Nuevo experimento**.
+4. Selecciona el dataset y el pipeline **Tabular básico**.
+5. Usa `species` como variable objetivo.
+6. Selecciona, por ejemplo, Regresión logística, Random Forest y SVM.
+7. Elige `Train/test estratificado`, `F1 macro` y semilla `42`.
+8. Ejecuta y abre el detalle para seguir etapas y métricas; usa **View in MLflow** y **View in Prefect** para abrir la ejecución exacta.
+9. El ganador se registra automáticamente con alias `champion`.
+10. En **Model management**, cambia el nombre registrado o promueve otro candidato si lo necesitas.
+11. En **Predicciones**, selecciona `champion` y completa las cuatro variables en el formulario generado.
 
-![Predictions](screenshots/predictions%20after%20prediction.png)
+Consulta [docs/DEMO.md](docs/DEMO.md) para el ejemplo completo.
 
-![Making a prediction](screenshots/prediction%20making%20a%20prediction.png)
+## Dataset EEG grande en una carpeta local
 
-### Prefect GUI
-![Prefect predictions pipeline](screenshots/prefect%20prediction%20flow.png)
+No comprimas ni subas una colección BIDS grande desde el navegador:
 
-### MLFlow GUI
-![MLflow training pipeline (experiment list)](screenshots/mlflow%20training%20pipeline%20experiment%20list.png)
+1. Descarga o extrae la raíz BIDS dentro de `datasets/`, por ejemplo `datasets/ds004504/`.
+2. Comprueba que esa carpeta contenga `dataset_description.json`, `participants.tsv` y archivos `*_eeg.*`.
+3. Inicia o reconstruye NeuroOps con `docker compose up -d --build`.
+4. Abre **Datasets → Carpeta local BIDS**, pulsa **Actualizar carpetas** y registra la carpeta detectada.
 
-![MLflow training pipeline (experiment datails)](screenshots/mlflow%20training%20pipeline%20experiment%20details.png)
+La API y el worker ven `datasets/` en `/datasets` con montaje de solo lectura. NeuroOps guarda únicamente metadatos, huella y ruta; eliminar el registro no elimina los archivos locales.
 
-[View all screenshots in the repository](screenshots/)
+## Perfiles de Docker
 
-## License
+El comando predeterminado incluye el núcleo tabular, MNE y MNE-BIDS. No instala Torch ni la cadena histórica de Sovaharmony. Las dependencias se fijan en `pyproject.toml` y `uv.lock`; la aplicación no instala paquetes durante la ejecución.
 
-This project is released under the MIT License. See the `LICENSE` file for details.
+### Core
 
-## Acknowledgements
+```bash
+docker compose up --build
+```
 
-This work was carried out by an Bioengineering student at the University of Antioquia as part of an academic internship conducted as a research project with the Grupo de Neurociencias de Antioquia (GNA). The repository also includes a wheel (.whl) of the sovaharmony package for EEG preprocessing.
+Incluye FastAPI, React, MLflow, Prefect, dependencias tabulares, MNE y MNE-BIDS.
+
+### Deep learning preparado
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.deep-learning.yml up --build
+```
+
+Instala PyTorch de forma aislada. La versión actual no registra todavía un modelo deep learning en el catálogo; el perfil prepara esa extensión sin aumentar la imagen core.
+
+### Producción con PostgreSQL
+
+Define una contraseña fuerte en `.env`:
+
+```env
+POSTGRES_PASSWORD=una-clave-larga-y-segura
+NEUROOPS_CORS_ORIGINS=https://neuroops.example.org
+VITE_API_URL=https://api.neuroops.example.org/api/v1
+VITE_MLFLOW_URL=https://mlflow.neuroops.example.org
+VITE_PREFECT_URL=https://prefect.neuroops.example.org
+PREFECT_UI_API_URL=https://prefect.neuroops.example.org/api
+MLFLOW_SERVER_ALLOWED_HOSTS=mlflow,mlflow:5000,mlflow.neuroops.example.org
+```
+
+Después:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.production.yml up --build
+```
+
+El perfil crea bases separadas para la aplicación, MLflow y Prefect, evitando colisiones entre migraciones.
+
+## Ejecución local sin Docker
+
+Requisitos: Python 3.11–3.13, [uv](https://docs.astral.sh/uv/) y Node.js 24.
+
+Backend:
+
+```bash
+cd backend
+cp .env.example .env
+uv sync --extra dev --extra eeg
+uv run alembic upgrade head
+uv run uvicorn app.main:app --reload --port 8000
+```
+
+La configuración local usa SQLite y almacenamiento de MLflow integrado. Para ejecutar la misma arquitectura sin Docker, inicia MLflow y Prefect en procesos separados:
+
+```bash
+cd backend
+uv run mlflow server --backend-store-uri sqlite:///./mlflow.db --host 0.0.0.0 --port 5000
+```
+
+```bash
+cd backend
+uv run prefect server start --host 0.0.0.0 --port 4200
+```
+
+En una tercera terminal registra los deployments y arranca el worker:
+
+```bash
+cd backend
+uv run prefect work-pool create neuroops-process --type process --overwrite
+uv run prefect deploy --all
+uv run prefect worker start --pool neuroops-process --type process --limit 1 --with-healthcheck
+```
+
+Configura en `backend/.env`:
+
+```env
+NEUROOPS_MLFLOW_TRACKING_URI=http://localhost:5000
+NEUROOPS_MLFLOW_REGISTRY_URI=http://localhost:5000
+NEUROOPS_PREFECT_API_URL=http://localhost:4200/api
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+## Pruebas y calidad
+
+```bash
+cd backend
+uv sync --extra dev --extra eeg
+uv run ruff check app tests alembic
+uv run pytest
+```
+
+```bash
+cd frontend
+npm ci
+npm run lint
+npm run build
+```
+
+La prueba E2E ejecuta:
+
+```text
+Iris CSV → pipeline tabular → 3 modelos → métricas → ganador
+→ MLflow Registry → alias champion → predicción → respuesta verificada
+```
+
+## Catálogo inicial
+
+### Pipelines
+
+| ID | Tipo | Disponibilidad core |
+| --- | --- | --- |
+| `tabular_basic` | CSV | Sí |
+| `eeg_mne_basic` | EEG BIDS | Sí; incluido en Docker |
+| `sovaharmony_legacy` | EEG BIDS | Solo si toda la cadena histórica está instalada |
+
+### Modelos
+
+| ID | Modelo | Probabilidades |
+| --- | --- | --- |
+| `logistic_regression` | Regresión logística | Sí |
+| `random_forest` | Random Forest | Sí |
+| `svm` | Support Vector Machine | Sí por configuración controlada |
+| `knn` | K-Nearest Neighbors | Sí |
+| `gradient_boosting` | Gradient Boosting | Sí |
+
+La API solo acepta IDs y parámetros incluidos en los registros. Nunca evalúa código Python enviado por usuarios.
+
+## Estructura
+
+```text
+backend/
+  app/api/v1/          API FastAPI
+  app/core/            configuración y errores
+  app/db/              entidades SQLAlchemy
+  app/domain/          contratos de plugins
+  app/ml/              pipelines, modelos y evaluación
+  app/orchestration/   flujos Prefect
+  prefect.yaml         deployments y work pool
+  app/services/        casos de uso y MLflow
+  alembic/             migraciones
+  tests/               unitarias, integración y E2E
+frontend/              aplicación React/Vite
+data/demo/             dataset no sensible
+datasets/              raíces BIDS locales, excluidas de Git
+docs/                  arquitectura y guías
+docker/                soporte de perfiles
+```
+
+## API principal
+
+La especificación exacta está disponible en `/docs`. Los grupos principales son:
+
+- `/api/v1/datasets`
+- `/api/v1/pipelines`
+- `/api/v1/models/catalog`
+- `/api/v1/experiments`
+- `/api/v1/runs`
+- `/api/v1/registry/models`
+- `/api/v1/predictions`
+- `/api/v1/system/dependencies`
+
+Los endpoints de tracking devuelven rutas profundas de MLflow/Prefect y el endpoint de esquema de entrada del Registry permite construir formularios de inferencia sin codificar JSON manualmente.
+
+Las operaciones largas de entrenamiento y predicción responden `202 Accepted` con un ID. Prefect conserva la cola y la interfaz consulta el estado sin mantener bloqueada la petición inicial.
+
+## Seguridad del MVP
+
+- Lista blanca de extensiones por tipo de dataset.
+- Límite de tamaño de carga y tamaño total extraído.
+- Normalización de nombres.
+- Bloqueo de Zip Slip y enlaces simbólicos.
+- Directorio aislado por dataset y experimento.
+- Parámetros permitidos por esquema.
+- Sin ejecución de código subido.
+- CORS configurable.
+- Secretos fuera del repositorio.
+- Telemetría externa de MLflow y Prefect desactivada por defecto.
+
+La autenticación y los roles están previstos como fase posterior. Antes de exponer el servicio a Internet se debe añadir identidad, autorización, TLS, límites por usuario y almacenamiento de objetos externo.
+
+## Extensión
+
+- [Guía de pipelines](docs/PIPELINE_PLUGIN_GUIDE.md)
+- [Guía de modelos](docs/MODEL_PLUGIN_GUIDE.md)
+- [Arquitectura](docs/ARCHITECTURE.md)
+- [Migración desde el legado](docs/MIGRATION_FROM_LEGACY.md)
+- [Solución de problemas](docs/TROUBLESHOOTING.md)
+
+## Limitaciones actuales
+
+- El perfil local usa un Process Worker con límite de un flow simultáneo para proteger SQLite; los candidatos de un experimento sí se ejecutan como tareas Prefect concurrentes.
+- La cancelación se solicita al flow-run desplegado y se refleja también en la base de NeuroOps.
+- El pipeline EEG implementa un flujo base de potencia espectral; no reemplaza una validación clínica ni todos los métodos avanzados del proyecto original.
+- Sovaharmony se muestra como adaptador opcional hasta contar con distribuciones públicas, completas y reproducibles de su cadena.
+- No hay autenticación en el MVP.
+
+## Atribución y licencia
+
+NeuroOps parte del repositorio MLOps original de Emmanuel Arizabaleta y del trabajo científico asociado al Grupo de Neurociencias de Antioquia. Este repositorio fue reconstruido como una nueva línea de desarrollo y no comparte el historial Git original; la atribución, la licencia y la documentación de migración se conservan explícitamente.
+
+Distribuido bajo la licencia MIT incluida en [LICENSE](LICENSE).

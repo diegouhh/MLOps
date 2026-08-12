@@ -1,34 +1,10 @@
-# Exclude large data and artifacts
-artifacts/
-mlruns/
-Experimenting/
-backups/
+.venv
+__pycache__
+.pytest_cache
+.ruff_cache
+tests
+*.db
+mlruns
+.prefect
+.git
 
-# Data directories (training/inputs) should not be baked into images
-data/
-
-# VCS and editor files
-.git/
-.gitignore
-.vscode/
-.DS_Store
-**/.DS_Store
-
-# Python caches
-**/__pycache__/
-**/*.pyc
-**/*.pyo
-**/*.pyd
-
-# Notebooks and checkpoints
-**/.ipynb_checkpoints/
-*.ipynb
-
-# Env files
-.env
-.env.*
-
-# Local virtualenvs or environments accidentally committed
-**/.venv/
-**/venv/
-**/env/

@@ -1,0 +1,8 @@
+services:
+  api:
+    build:
+      target: deep-learning
+
+  prefect-worker:
+    build:
+      target: deep-learning

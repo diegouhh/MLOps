@@ -1,0 +1,32 @@
+prefect-version: null
+name: neuroops
+build: null
+push: null
+pull: null
+
+deployments:
+  - name: neuroops-experiments
+    version: "0.3.0"
+    tags: [neuroops, training]
+    description: Orquesta datasets, candidatos, evaluación y registro de modelos.
+    entrypoint: app/orchestration/flows.py:run_experiment_flow
+    parameters: {}
+    schedules: []
+    work_pool:
+      name: neuroops-process
+      work_queue_name: default
+      job_variables:
+        working_dir: /app
+
+  - name: neuroops-predictions
+    version: "0.3.0"
+    tags: [neuroops, inference]
+    description: Ejecuta inferencia trazable con modelos registrados.
+    entrypoint: app/orchestration/flows.py:run_prediction_flow
+    parameters: {}
+    schedules: []
+    work_pool:
+      name: neuroops-process
+      work_queue_name: default
+      job_variables:
+        working_dir: /app

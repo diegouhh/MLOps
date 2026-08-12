@@ -1,29 +1,45 @@
-FROM python:3.9-slim
+FROM python:3.12-slim AS base
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_CACHE_DIR=/tmp/uv-cache \
+    PATH=/app/.venv/bin:$PATH \
+    MPLCONFIGDIR=/tmp/matplotlib \
+    PREFECT_HOME=/app/state/prefect \
+    MLFLOW_DISABLE_TELEMETRY=true \
+    DO_NOT_TRACK=true
+
+RUN useradd --create-home --uid 10001 neuroops \
+    && pip install --no-cache-dir uv==0.11.33
 WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project \
+    && rm -rf /tmp/uv-cache
+COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
+COPY prefect.yaml ./prefect.yaml
+RUN uv sync --frozen --no-dev \
+    && mkdir -p /app/data/uploads /app/data/processed /app/artifacts /app/state \
+    && chown -R neuroops:neuroops /app
+USER neuroops
+EXPOSE 8000
+HEALTHCHECK --interval=10s --timeout=3s --retries=8 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=2)" || exit 1
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    python3-tk \
-    graphviz \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+FROM base AS eeg
+USER root
+RUN uv sync --frozen --no-dev --extra eeg && rm -rf /tmp/uv-cache && chown -R neuroops:neuroops /app
+USER neuroops
 
-# Install poetry
-RUN pip install --no-cache-dir poetry==1.4.2
+FROM eeg AS deep-learning
+USER root
+RUN uv sync --frozen --no-dev --extra eeg --extra deep-learning && rm -rf /tmp/uv-cache && chown -R neuroops:neuroops /app
+USER neuroops
 
-# Copy only dependency files first
-COPY pyproject.toml poetry.lock* ./
-
-# Configure poetry and install dependencies
-RUN poetry config virtualenvs.create false \
-    && poetry install --no-interaction --no-ansi --no-root
-
-# Copy the rest of the application
-COPY . .
-
-ENV PYTHONPATH=/app
-ENV MLFLOW_TRACKING_URI=http://localhost:5000
-
-CMD ["poetry", "run", "prefect", "server", "start", "--host", "0.0.0.0", "--port", "4200"] 
+FROM eeg AS production
+USER root
+RUN uv sync --frozen --no-dev --extra eeg --extra postgres && rm -rf /tmp/uv-cache && chown -R neuroops:neuroops /app
+USER neuroops

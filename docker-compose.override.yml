@@ -1,0 +1,24 @@
+services:
+  prefect-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: prefect
+      POSTGRES_PASSWORD: prefect-local
+      POSTGRES_DB: prefect
+    volumes:
+      - prefect_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prefect -d prefect"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  prefect:
+    environment:
+      PREFECT_SERVER_DATABASE_CONNECTION_URL: postgresql+asyncpg://prefect:prefect-local@prefect-db:5432/prefect
+    depends_on:
+      prefect-db:
+        condition: service_healthy
+
+volumes:
+  prefect_postgres_data:
