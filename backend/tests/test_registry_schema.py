@@ -59,11 +59,19 @@ def test_registered_tabular_model_exposes_prediction_fields(db, demo_dataset):
     from app.main import app
 
     with TestClient(app) as client:
-        response = client.get(
-            "/api/v1/registry/models/iris-classifier/versions/champion/input-schema"
-        )
-        assert response.status_code == 200
-        assert response.json()["example"]["sepal_length"] == 0.0
+    response = client.get(
+        "/api/v1/registry/models/iris-classifier/versions/champion/input-schema"
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["example"] == {
+        "sepal_length": 5.1,
+        "sepal_width": 3.5,
+        "petal_length": 1.4,
+        "petal_width": 0.2,
+    }
+    assert payload["examples"]
+    assert payload["examples"][0] == payload["example"]
 
 
 def test_registered_model_name_accepts_readable_names():
