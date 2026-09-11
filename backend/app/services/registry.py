@@ -90,14 +90,21 @@ def _json_value(value: Any) -> Any:
     return value
 
 
-def _tabular_examples(storage_path: str, columns: list[str], limit: int = 12) -> list[dict[str, Any]]:
+def _tabular_examples(
+    storage_path: str,
+    columns: list[str],
+    limit: int = 12,
+) -> list[dict[str, Any]]:
     try:
         frame = pd.read_csv(storage_path, usecols=columns)
     except Exception:
         return []
     examples: list[dict[str, Any]] = []
     for _, row in frame.head(200).iterrows():
-        record = {column: _json_value(row[column]) for column in columns}
+        record = {
+            column: _json_value(row[column])
+            for column in columns
+        }
         if any(value is None for value in record.values()):
             continue
         examples.append(record)
@@ -244,7 +251,9 @@ def validate_prediction_records(
     if schema["input_mode"] == "eeg_recording":
         allowed = {item["value"] for item in schema["recordings"]}
         if not allowed:
-            raise ValidationError("El dataset no contiene registros EEG disponibles para predicción")
+            raise ValidationError(
+    "El dataset no contiene registros EEG disponibles para predicción"
+)
         for index, record in enumerate(records, start=1):
             if set(record) != {"recording"}:
                 raise ValidationError(
