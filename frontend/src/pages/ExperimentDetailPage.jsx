@@ -95,12 +95,12 @@ export default function ExperimentDetailPage() {
     <>
       <PageHeading
         title={item.name}
-        actions={<><Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/experiments')}>Volver</Button>{mlflowLink && <Button href={mlflowLink} target="_blank" icon={<ExperimentOutlined />}>View in MLflow ↗</Button>}{prefectLink && <Button href={prefectLink} target="_blank" icon={<SettingOutlined />}>View in Prefect ↗</Button>}</>}
+        actions={<><Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/experiments')}>Volver</Button>{mlflowLink && <Button href={mlflowLink} target="_blank" icon={<ExperimentOutlined />}>Ver en MLflow</Button>}{prefectLink && <Button href={prefectLink} target="_blank" icon={<SettingOutlined />}>Ver en Prefect</Button>}</>}
       />
       {(experiment.error || tracking.error || actionError || item.error_message) && <Alert type="error" showIcon message={actionError || item.error_message || experiment.error || tracking.error} style={{ marginBottom: 16 }} />}
       <Card style={{ marginBottom: 16 }}>
         <Row gutter={[18, 18]} align="middle">
-          <Col flex="auto"><Space direction="vertical"><StatusTag value={item.status} /><Title level={4} style={{ margin: 0 }}>{item.pipeline_id}</Title><Text type="secondary">{item.runs.length} candidatos · {titleCase(item.primary_metric)}</Text></Space></Col>
+          <Col flex="auto"><Space direction="vertical"><StatusTag value={item.status} /><Title level={4} style={{ margin: 0 }}>{item.pipeline_id}</Title><Text type="secondary">{item.runs.length} candidatos - {titleCase(item.primary_metric)}</Text></Space></Col>
           <Col><Space wrap>{['queued', 'running'].includes(item.status) && <Button danger icon={<StopOutlined />} onClick={() => runAction('cancel')}>Cancelar</Button>}<Button type="primary" icon={<RedoOutlined />} onClick={() => runAction('rerun')}>Reejecutar</Button></Space></Col>
         </Row>
       </Card>
@@ -117,7 +117,7 @@ export default function ExperimentDetailPage() {
                 {run.error_message && <Alert type="error" showIcon message={run.error_message} style={{ marginTop: 10 }} />}
                 <div className="metrics-grid">{Object.entries(run.metrics || {}).map(([metric, value]) => <div className="metric-tile" key={metric}><span>{titleCase(metric)}</span><strong>{formatMetric(value)}</strong></div>)}</div>
                 <Space wrap style={{ marginTop: 16 }}>
-                  {runLink ? <Button href={runLink} target="_blank" icon={<ExperimentOutlined />}>View in MLflow</Button> : <Tooltip title="El run aparecerá cuando MLflow lo cree"><Button disabled>View in MLflow</Button></Tooltip>}
+                  {runLink ? <Button href={runLink} target="_blank" icon={<ExperimentOutlined />}>Ver en MLflow</Button> : <Tooltip title="El run aparecerá cuando MLflow lo cree"><Button disabled>Ver en MLflow</Button></Tooltip>}
                   {run.status === 'completed' && run.candidate_id && <Button type="primary" onClick={() => openRegistration(run)}>Registrar / promover</Button>}
                 </Space>
                 {run.mlflow_run_id && <Paragraph copyable={{ text: run.mlflow_run_id }} className="mono" ellipsis style={{ marginTop: 12, marginBottom: 0 }}>{run.mlflow_run_id}</Paragraph>}
@@ -126,9 +126,17 @@ export default function ExperimentDetailPage() {
           )
         })}
       </Row>
+      <Card title="Trazabilidad" style={{ marginBottom: 16 }}>
+        <Descriptions bordered column={{ xs: 1, md: 2 }} items={[
+          { key: 'neuroops', label: 'NeuroOps ID', children: <Text copyable className="mono">{item.id}</Text> },
+          { key: 'prefect', label: 'Prefect Flow ID', children: item.prefect_flow_run_id ? <Text copyable className="mono">{item.prefect_flow_run_id}</Text> : '-' },
+          { key: 'mlflow', label: 'MLflow Parent Run ID', children: item.mlflow_parent_run_id ? <Text copyable className="mono">{item.mlflow_parent_run_id}</Text> : '-' },
+          { key: 'registry', label: 'Model Registry', children: item.registered_model_name || '-' },
+        ]} />
+      </Card>
       <Card title="Configuración reproducible">
         <Descriptions bordered column={{ xs: 1, md: 2 }} items={descriptions} />
-        <Space wrap style={{ marginTop: 16 }}>{Object.entries(item.pipeline_config || {}).map(([key, value]) => <Tag key={key}>{titleCase(key)}: {Array.isArray(value) ? value.join(', ') || '—' : String(value ?? '—')}</Tag>)}</Space>
+        <Space wrap style={{ marginTop: 16 }}>{Object.entries(item.pipeline_config || {}).map(([key, value]) => <Tag key={key}>{titleCase(key)}: {Array.isArray(value) ? value.join(', ') || '-' : String(value ?? '-')}</Tag>)}</Space>
       </Card>
       <Modal title={`Registrar ${selectedRun?.model_id || 'candidato'}`} open={Boolean(selectedRun)} onCancel={() => setSelectedRun(null)} onOk={register} okText="Registrar versión" confirmLoading={saving}>
         <Form layout="vertical">

@@ -1,4 +1,4 @@
-name: neuroops
+name: "${COMPOSE_PROJECT_NAME:-neuroops}"
 
 services:
   init-volumes:
@@ -146,6 +146,7 @@ services:
       NEUROOPS_DATA_DIR: /app/data
       NEUROOPS_MOUNTED_DATASETS_DIR: /datasets
       NEUROOPS_ARTIFACTS_DIR: /app/artifacts
+      NEUROOPS_SOURCE_COMMIT: "${NEUROOPS_SOURCE_COMMIT:-}"
       PREFECT_API_URL: http://prefect:4200/api
       PREFECT_HOME: /app/state/prefect-worker
       MPLCONFIGDIR: /tmp/matplotlib
@@ -188,6 +189,8 @@ services:
       NEUROOPS_DATA_DIR: /app/data
       NEUROOPS_MOUNTED_DATASETS_DIR: /datasets
       NEUROOPS_ARTIFACTS_DIR: /app/artifacts
+      NEUROOPS_AUTO_CREATE_SCHEMA: "false"
+      NEUROOPS_SOURCE_COMMIT: "${NEUROOPS_SOURCE_COMMIT:-}"
       PREFECT_API_URL: http://prefect:4200/api
       PREFECT_HOME: /app/state/prefect-client
       MPLCONFIGDIR: /tmp/matplotlib

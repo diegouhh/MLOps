@@ -88,6 +88,7 @@ def test_prediction_payload_is_validated_before_queueing(db, demo_dataset):
         records=[valid],
     )
     assert job.status == "queued"
+    assert job.resolved_model_version == "1"
     with pytest.raises(ValidationError, match="faltan campos"):
         create_prediction_job(
             db,
@@ -212,6 +213,8 @@ def test_experiment_is_dispatched_to_prefect_deployment(db, demo_dataset, monkey
     async def dispatch(name, **kwargs):
         assert name == "NeuroOps experiment/neuroops-experiments"
         assert kwargs["parameters"] == {"experiment_id": experiment.id}
+        assert kwargs["flow_run_name"] == experiment.name
+        assert f"neuroops-experiment-id:{experiment.id}" in kwargs["tags"]
         assert kwargs["timeout"] == 0
         assert kwargs["idempotency_key"] == f"neuroops:experiment:{experiment.id}"
         return SimpleNamespace(id=prefect_id)

@@ -150,6 +150,7 @@ class PredictionJob(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     registered_model_name: Mapped[str] = mapped_column(String(200), index=True)
     version_or_alias: Mapped[str] = mapped_column(String(50))
+    resolved_model_version: Mapped[str | None] = mapped_column(String(50), index=True)
     status: Mapped[str] = mapped_column(String(30), default="queued")
     input_payload: Mapped[list] = mapped_column(JSON, default=list)
     result_payload: Mapped[dict | None] = mapped_column(JSON)

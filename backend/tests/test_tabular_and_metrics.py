@@ -36,6 +36,16 @@ def test_group_validation_never_mixes_subjects():
         assert set(groups.iloc[train]).isdisjoint(set(groups.iloc[test]))
 
 
+def test_grouped_data_rejects_non_group_validation():
+    X = pd.DataFrame({"x": range(12)})
+    y = pd.Series([0, 1] * 6)
+    groups = pd.Series(["a"] * 3 + ["b"] * 3 + ["c"] * 3 + ["d"] * 3)
+    with pytest.raises(ValidationError, match="Se detectaron grupos"):
+        make_validation_split(
+            "train_test_split", X, y, groups, {"test_size": 0.25}, 42
+        )
+
+
 def test_seeded_split_is_reproducible():
     X = pd.DataFrame({"x": range(20)})
     y = pd.Series([0, 1] * 10)

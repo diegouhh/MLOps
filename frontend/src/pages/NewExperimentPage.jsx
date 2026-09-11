@@ -45,6 +45,7 @@ export default function NewExperimentPage() {
   const columns = dataset?.versions.at(-1)?.schema_summary?.columns || []
   const compatiblePipelines = (pipelines.data || []).filter((item) => item.available && (!dataset || item.data_type === dataset.data_type))
   const compatibleModels = (models.data || []).filter((item) => item.available && (!pipeline?.supported_models.length || pipeline.supported_models.includes(item.id)))
+  const isEegPipeline = pipeline?.data_type === 'eeg_bids'
 
   useEffect(() => {
     const requested = searchParams.get('model')
@@ -57,6 +58,11 @@ export default function NewExperimentPage() {
   useEffect(() => {
     if (!pipeline) return
     setPipelineConfig((current) => Object.keys(current).length ? current : schemaDefaults(pipeline.config_schema))
+    if (pipeline.data_type === 'eeg_bids') {
+      setValidation((current) => ['group_kfold', 'stratified_group_kfold'].includes(current.strategy)
+        ? current
+        : { ...current, strategy: 'stratified_group_kfold' })
+    }
   }, [pipeline])
 
   function choosePipeline(id) {
@@ -80,6 +86,7 @@ export default function NewExperimentPage() {
       if (missing.length) return `Completa: ${missing.map(titleCase).join(', ')}`
     }
     if (step === 3 && !selectedModels.length) return 'Selecciona al menos un modelo'
+    if (step === 4 && !isEegPipeline && ['group_kfold', 'stratified_group_kfold'].includes(validation.strategy) && !pipelineConfig.group_column) return 'Selecciona una columna de grupo antes de usar validación por grupos'
     return ''
   }
 
@@ -135,7 +142,7 @@ export default function NewExperimentPage() {
       <Card>
         {step === 0 && <>
           <Title level={3}>Selecciona el dataset</Title>
-          <Row gutter={[14, 14]}>{(datasets.data || []).map((item) => <Col xs={24} md={12} xl={8} key={item.id}><Card className={`choice-card ${datasetId === item.id ? 'selected' : ''}`} onClick={() => { setDatasetId(item.id); setPipelineId(''); setPipelineConfig({}) }}><Space direction="vertical"><Space><strong>{item.name}</strong>{datasetId === item.id && <CheckOutlined style={{ color: '#1677ff' }} />}</Space><Text type="secondary">{item.data_type} · v{item.current_version}</Text><StatusTag value={item.status} /></Space></Card></Col>)}</Row>
+          <Row gutter={[14, 14]}>{(datasets.data || []).map((item) => <Col xs={24} md={12} xl={8} key={item.id}><Card className={`choice-card ${datasetId === item.id ? 'selected' : ''}`} onClick={() => { setDatasetId(item.id); setPipelineId(''); setPipelineConfig({}) }}><Space direction="vertical"><Space><strong>{item.name}</strong>{datasetId === item.id && <CheckOutlined style={{ color: '#1677ff' }} />}</Space><Text type="secondary">{item.data_type} - v{item.current_version}</Text><StatusTag value={item.status} /></Space></Card></Col>)}</Row>
         </>}
         {step === 1 && <>
           <Title level={3}>Selecciona el pipeline</Title>
@@ -157,23 +164,24 @@ export default function NewExperimentPage() {
         {step === 4 && <>
           <Title level={3}>Validación científica</Title>
           <Form layout="vertical">
-            <Form.Item label="Estrategia"><Radio.Group value={validation.strategy} onChange={(event) => setValidation({ ...validation, strategy: event.target.value })}><Space direction="vertical"><Radio value="train_test_split">Train/test estratificado</Radio><Radio value="stratified_kfold">Stratified K-Fold</Radio><Radio value="group_kfold">Group K-Fold</Radio><Radio value="stratified_group_kfold">Stratified Group K-Fold</Radio></Space></Radio.Group></Form.Item>
+            <Form.Item label="Estrategia"><Radio.Group value={validation.strategy} onChange={(event) => setValidation({ ...validation, strategy: event.target.value })}><Space direction="vertical"><Radio value="train_test_split" disabled={isEegPipeline}>Train/test estratificado</Radio><Radio value="stratified_kfold" disabled={isEegPipeline}>Stratified K-Fold</Radio><Radio value="group_kfold">Group K-Fold</Radio><Radio value="stratified_group_kfold">Stratified Group K-Fold</Radio></Space></Radio.Group></Form.Item>
             <Row gutter={16}>
               <Col xs={24} md={8}>{validation.strategy === 'train_test_split' ? <Form.Item label="Proporción de prueba"><InputNumber min={0.05} max={0.5} step={0.05} value={validation.test_size} onChange={(value) => setValidation({ ...validation, test_size: value })} className="full-width" /></Form.Item> : <Form.Item label="Número de folds"><InputNumber min={2} max={20} value={validation.n_splits} onChange={(value) => setValidation({ ...validation, n_splits: value })} className="full-width" /></Form.Item>}</Col>
               <Col xs={24} md={8}><Form.Item label="Métrica principal"><Select value={validation.metric} onChange={(value) => setValidation({ ...validation, metric: value })} options={['f1_macro', 'balanced_accuracy', 'accuracy', 'precision_macro', 'recall_macro', 'f1_weighted', 'roc_auc'].map((value) => ({ value, label: titleCase(value) }))} /></Form.Item></Col>
               <Col xs={24} md={8}><Form.Item label="Semilla"><InputNumber min={0} value={validation.seed} onChange={(value) => setValidation({ ...validation, seed: value })} className="full-width" /></Form.Item></Col>
             </Row>
-            {['group_kfold', 'stratified_group_kfold'].includes(validation.strategy) && !pipelineConfig.group_column && <Alert type="warning" showIcon message="Esta estrategia necesita una columna de grupo en la configuración del pipeline." />}
+            {isEegPipeline && <Alert type="info" showIcon message="Los experimentos EEG se validan por sujeto para evitar que épocas del mismo sujeto aparezcan en entrenamiento y validación." />}
+            {!isEegPipeline && ['group_kfold', 'stratified_group_kfold'].includes(validation.strategy) && !pipelineConfig.group_column && <Alert type="warning" showIcon message="Esta estrategia necesita una columna de grupo en la configuración del pipeline." />}
           </Form>
         </>}
         {step === 5 && <>
           <Title level={3}>Revisa y ejecuta</Title>
           <Form layout="vertical">
-            <Form.Item label="Nombre del experimento"><Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Iris · comparación inicial" /></Form.Item>
+            <Form.Item label="Nombre del experimento"><Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ej. Iris - comparación inicial" /></Form.Item>
             <Form.Item label="Nombre en Model Registry" required extra="Los siguientes experimentos con este nombre crearán nuevas versiones del mismo modelo."><Input value={registeredModelName} maxLength={200} onChange={(event) => setRegisteredModelName(event.target.value)} /></Form.Item>
           </Form>
           <Descriptions bordered column={{ xs: 1, md: 2 }} items={reviewItems} />
-          <Title level={5} style={{ marginTop: 22 }}>Configuración del pipeline</Title><Space wrap>{Object.entries(pipelineConfig).map(([key, value]) => <Tag key={key}>{titleCase(key)}: {Array.isArray(value) ? value.join(', ') || '—' : String(value ?? '—')}</Tag>)}</Space>
+          <Title level={5} style={{ marginTop: 22 }}>Configuración del pipeline</Title><Space wrap>{Object.entries(pipelineConfig).map(([key, value]) => <Tag key={key}>{titleCase(key)}: {Array.isArray(value) ? value.join(', ') || '-' : String(value ?? '-')}</Tag>)}</Space>
         </>}
         {(error || datasets.error || pipelines.error || models.error) && <Alert type="error" showIcon message={error || datasets.error || pipelines.error || models.error} style={{ marginTop: 18 }} />}
         <div className="wizard-footer">

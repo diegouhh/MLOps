@@ -10,8 +10,18 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.core.errors import ResourceNotFoundError, ValidationError
-from app.db.models import PredictionJob
+from app.core.traceability import prediction_run_name
+from app.db.models import PredictionJob, RegisteredModelReference
 from app.services.registry import get_model_reference, validate_prediction_records
+
+
+def _resolve_reference(db: Session, job: PredictionJob) -> RegisteredModelReference:
+    selector = job.resolved_model_version or job.version_or_alias
+    reference = get_model_reference(db, job.registered_model_name, selector)
+    if job.resolved_model_version != reference.version:
+        job.resolved_model_version = reference.version
+        db.commit()
+    return reference
 
 
 def create_prediction_job(
@@ -26,6 +36,7 @@ def create_prediction_job(
     job = PredictionJob(
         registered_model_name=model_name,
         version_or_alias=version_or_alias,
+        resolved_model_version=reference.version,
         status="queued",
         input_payload=records,
     )
@@ -62,6 +73,7 @@ def initialize_prediction_execution(
         raise ValidationError("La predicción ya está en ejecución")
     if job.status == "completed":
         raise ValidationError("La predicción ya terminó")
+    reference = _resolve_reference(db, job)
     job.status = "running"
     job.error_message = None
     job.prefect_flow_run_id = prefect_flow_run_id or job.prefect_flow_run_id
@@ -70,12 +82,19 @@ def initialize_prediction_execution(
     tracking_experiment = client.get_experiment_by_name(settings.mlflow_experiment_name)
     if not tracking_experiment:
         raise ValidationError("MLflow no pudo crear el experimento de seguimiento")
+    display_name = prediction_run_name(
+        job.registered_model_name,
+        reference.version,
+        job.id,
+    )
     active_run = client.create_run(
         tracking_experiment.experiment_id,
         tags={
-            "mlflow.runName": f"prediction-{job.id}",
+            "mlflow.runName": display_name,
             "neuroops.run_type": "prediction",
             "neuroops.prediction_job_id": job.id,
+            "neuroops.model_name": job.registered_model_name,
+            "neuroops.model_version": reference.version,
         },
     )
     job.mlflow_run_id = active_run.info.run_id
@@ -83,30 +102,24 @@ def initialize_prediction_execution(
     for key, value in {
         "prediction_job_id": job.id,
         "model_name": job.registered_model_name,
-        "version_or_alias": job.version_or_alias,
+        "requested_version_or_alias": job.version_or_alias,
+        "resolved_model_version": reference.version,
         "record_count": len(job.input_payload),
     }.items():
         client.log_param(active_run.info.run_id, key, value)
-    selector = (
-        f"models:/{job.registered_model_name}/{job.version_or_alias}"
-        if job.version_or_alias.isdigit()
-        else f"models:/{job.registered_model_name}@{job.version_or_alias}"
-    )
+    selector = f"models:/{job.registered_model_name}/{reference.version}"
     return {
         "job_id": job.id,
         "selector": selector,
         "records": job.input_payload,
         "mlflow_run_id": active_run.info.run_id,
+        "resolved_model_version": reference.version,
     }
 
 
 def validate_prediction_job(db: Session, job_id: str) -> str:
     job = get_prediction_job(db, job_id)
-    reference = get_model_reference(
-        db,
-        job.registered_model_name,
-        job.version_or_alias,
-    )
+    reference = _resolve_reference(db, job)
     validate_prediction_records(db, reference, job.input_payload)
     return job.id
 

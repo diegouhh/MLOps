@@ -42,6 +42,12 @@ def make_validation_split(
     random_seed: int,
 ) -> tuple[str, Any]:
     folds = int(config.get("n_splits", 5))
+    group_strategies = {"group_kfold", "stratified_group_kfold"}
+    if groups is not None and strategy not in group_strategies:
+        raise ValidationError(
+            "Se detectaron grupos en los datos. Usa group_kfold o stratified_group_kfold "
+            "para evitar mezclar el mismo sujeto o grupo entre entrenamiento y validación"
+        )
     if strategy == "train_test_split":
         test_size = float(config.get("test_size", 0.2))
         if not 0.05 <= test_size <= 0.5:

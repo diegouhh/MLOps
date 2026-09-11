@@ -157,6 +157,7 @@ class PredictionRead(OrmModel):
     id: str
     registered_model_name: str
     version_or_alias: str
+    resolved_model_version: str | None
     status: str
     input_payload: list[dict[str, Any]]
     result_payload: dict[str, Any] | None

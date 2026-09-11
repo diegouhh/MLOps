@@ -108,7 +108,6 @@ def fail_experiment_task(experiment_id: str, error_message: str) -> None:
 
 @flow(
     name="NeuroOps experiment",
-    flow_run_name="experiment-{experiment_id}",
     persist_result=False,
 )
 def run_experiment_flow(experiment_id: str) -> str:
@@ -121,7 +120,7 @@ def run_experiment_flow(experiment_id: str) -> str:
         prepared = build_training_data_task(experiment_id, data)
         futures = [
             train_candidate_task.with_options(
-                name=f"Entrenar y evaluar · {candidate['model_id']}"
+                name=f"Entrenar y evaluar - {candidate['model_id']}"
             ).submit(
                 experiment_id,
                 candidate["training_run_id"],
@@ -185,7 +184,6 @@ def fail_prediction_task(job_id: str, error_message: str) -> None:
 
 @flow(
     name="NeuroOps prediction",
-    flow_run_name="prediction-{job_id}",
     persist_result=False,
 )
 def run_prediction_flow(job_id: str) -> str:
@@ -197,4 +195,3 @@ def run_prediction_flow(job_id: str) -> str:
     except Exception as exc:
         fail_prediction_task(job_id, str(exc))
         raise
-
