@@ -87,15 +87,6 @@ function compactSteps(steps) {
   return `${visible.join(' → ')}${remaining > 0 ? ` +${remaining}` : ''}`
 }
 
-function listItems(values) {
-  if (!values?.length) return <Text type="secondary">Sin información adicional</Text>
-  return (
-    <ul className="catalog-detail-list">
-      {values.map((value) => <li key={value}>{value}</li>)}
-    </ul>
-  )
-}
-
 export default function CatalogPage({ type }) {
   const { message } = App.useApp()
   const isPipeline = type === 'pipelines'
@@ -111,7 +102,8 @@ export default function CatalogPage({ type }) {
   const [dataTypeFilter, setDataTypeFilter] = useState('')
   const [familyFilter, setFamilyFilter] = useState('')
   const [interpretabilityFilter, setInterpretabilityFilter] = useState('')
-  const [costFilter, setCostFilter] = useState('')
+  const [trainingCostFilter, setTrainingCostFilter] = useState('')
+  const [inferenceCostFilter, setInferenceCostFilter] = useState('')
   const [pipelineFilter, setPipelineFilter] = useState('')
   const [datasetFilter, setDatasetFilter] = useState('')
   const [selected, setSelected] = useState(null)
@@ -158,7 +150,8 @@ export default function CatalogPage({ type }) {
       if (interpretabilityFilter && item.interpretability !== interpretabilityFilter) {
         return false
       }
-      if (costFilter && item.compute_cost !== costFilter) return false
+      if (trainingCostFilter && item.training_cost !== trainingCostFilter) return false
+      if (inferenceCostFilter && item.inference_cost !== inferenceCostFilter) return false
       if (
         pipelineFilter
         && !pipelineById[pipelineFilter]?.supported_models?.includes(item.id)
@@ -168,7 +161,7 @@ export default function CatalogPage({ type }) {
       return true
     })
   }, [
-    costFilter,
+    inferenceCostFilter,
     dataTypeFilter,
     familyFilter,
     interpretabilityFilter,
@@ -179,6 +172,7 @@ export default function CatalogPage({ type }) {
     search,
     stateFilter,
     taskFilter,
+    trainingCostFilter,
   ])
 
   const comparedModels = comparedModelIds.map((modelId) => modelById[modelId]).filter(Boolean)
@@ -191,7 +185,8 @@ export default function CatalogPage({ type }) {
     setDataTypeFilter('')
     setFamilyFilter('')
     setInterpretabilityFilter('')
-    setCostFilter('')
+    setTrainingCostFilter('')
+    setInferenceCostFilter('')
     setPipelineFilter('')
     setDatasetFilter('')
   }
@@ -327,10 +322,18 @@ export default function CatalogPage({ type }) {
             <Select
               allowClear
               className="catalog-filter"
-              placeholder="Costo"
-              value={costFilter || undefined}
-              onChange={(value) => setCostFilter(value || '')}
-              options={uniqueOptions(resource.data, 'compute_cost', costLabels)}
+              placeholder="Costo entrenamiento"
+              value={trainingCostFilter || undefined}
+              onChange={(value) => setTrainingCostFilter(value || '')}
+              options={uniqueOptions(resource.data, 'training_cost', costLabels)}
+            />
+            <Select
+              allowClear
+              className="catalog-filter"
+              placeholder="Costo inferencia"
+              value={inferenceCostFilter || undefined}
+              onChange={(value) => setInferenceCostFilter(value || '')}
+              options={uniqueOptions(resource.data, 'inference_cost', costLabels)}
             />
             <Select
               allowClear
@@ -433,11 +436,11 @@ export default function CatalogPage({ type }) {
         </div>
         <div className="catalog-facts catalog-facts-three">
           <span><strong>{levelLabels[item.interpretability] || '—'}</strong> interpretabilidad</span>
-          <span><strong>{costLabels[item.compute_cost] || '—'}</strong> costo</span>
-          <span><strong>{compatiblePipelines.length}</strong> pipelines</span>
+          <span><strong>{costLabels[item.training_cost] || '—'}</strong> entrenamiento</span>
+          <span><strong>{costLabels[item.inference_cost] || '—'}</strong> inferencia</span>
         </div>
         <Text type="secondary" className="catalog-inline-note">
-          {(item.strengths || [])[0] || 'Consulta la ficha para ver ventajas y limitaciones.'}
+          {compatiblePipelines.length} {compatiblePipelines.length === 1 ? 'pipeline compatible' : 'pipelines compatibles'}
         </Text>
         <div className="catalog-actions catalog-actions-compact">
           <Button onClick={() => setSelected(item)}>Ver detalles</Button>
@@ -551,20 +554,11 @@ export default function CatalogPage({ type }) {
             { key: 'task', label: 'Tarea', children: labels(item.task_types, taskLabels).join(', ') || 'No declarada' },
             { key: 'family', label: 'Familia', children: familyLabels[item.family] || titleCase(item.family || 'other') },
             { key: 'interpretability', label: 'Interpretabilidad', children: levelLabels[item.interpretability] || 'No declarada' },
-            { key: 'cost', label: 'Costo computacional', children: costLabels[item.compute_cost] || 'No declarado' },
+            { key: 'training-cost', label: 'Costo de entrenamiento', children: costLabels[item.training_cost] || 'No declarado' },
+            { key: 'inference-cost', label: 'Costo de inferencia', children: costLabels[item.inference_cost] || 'No declarado' },
             { key: 'probability', label: 'Probabilidades', children: item.supports_probability ? 'Sí' : 'No' },
           ]}
         />
-        <div className="catalog-detail-grid">
-          <div className="catalog-detail-section">
-            <Title level={5}>Ventajas</Title>
-            {listItems(item.strengths)}
-          </div>
-          <div className="catalog-detail-section">
-            <Title level={5}>Limitaciones</Title>
-            {listItems(item.limitations)}
-          </div>
-        </div>
         <div className="catalog-detail-section">
           <Title level={5}>Pipelines compatibles</Title>
           <Space wrap size={[6, 6]}>
@@ -625,11 +619,19 @@ export default function CatalogPage({ type }) {
       ])),
     },
     {
-      key: 'cost',
-      label: 'Costo computacional',
+      key: 'training-cost',
+      label: 'Costo de entrenamiento',
       ...Object.fromEntries(comparedModels.map((model) => [
         model.id,
-        costLabels[model.compute_cost] || 'No declarado',
+        costLabels[model.training_cost] || 'No declarado',
+      ])),
+    },
+    {
+      key: 'inference-cost',
+      label: 'Costo de inferencia',
+      ...Object.fromEntries(comparedModels.map((model) => [
+        model.id,
+        costLabels[model.inference_cost] || 'No declarado',
       ])),
     },
     {
@@ -646,22 +648,6 @@ export default function CatalogPage({ type }) {
       ...Object.fromEntries(comparedModels.map((model) => [
         model.id,
         String(compatiblePipelinesByModel[model.id]?.length || 0),
-      ])),
-    },
-    {
-      key: 'strength',
-      label: 'Ventaja principal',
-      ...Object.fromEntries(comparedModels.map((model) => [
-        model.id,
-        model.strengths?.[0] || 'No declarada',
-      ])),
-    },
-    {
-      key: 'limitation',
-      label: 'Limitación principal',
-      ...Object.fromEntries(comparedModels.map((model) => [
-        model.id,
-        model.limitations?.[0] || 'No declarada',
       ])),
     },
   ]

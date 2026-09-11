@@ -16,7 +16,6 @@ import numpy as np
 from mlflow import MlflowClient
 from sklearn.base import clone
 from sklearn.metrics import auc, roc_curve
-from sklearn.model_selection import cross_val_predict
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import label_binarize
 from sqlalchemy import select
@@ -36,7 +35,12 @@ from app.db.models import (
     TrainingRun,
     utcnow,
 )
-from app.ml.evaluators.classification import evaluate_predictions, make_validation_split
+from app.ml.evaluators.classification import (
+    aggregate_group_predictions,
+    evaluate_predictions,
+    make_validation_split,
+    summarize_fold_metrics,
+)
 from app.ml.models.registry import model_registry
 from app.ml.pipelines.registry import pipeline_registry
 from app.schemas.api import ExperimentCreate
@@ -241,6 +245,25 @@ def _dataset_version(dataset: Dataset, version: int):
     return selected
 
 
+def _align_probabilities(
+    probabilities: Any,
+    classes: Any,
+    labels: np.ndarray,
+) -> np.ndarray | None:
+    if probabilities is None or classes is None:
+        return None
+    matrix = np.asarray(probabilities, dtype=float)
+    class_values = np.asarray(classes).tolist()
+    if matrix.ndim != 2 or matrix.shape[1] != len(class_values):
+        return None
+    positions = {label: index for index, label in enumerate(labels.tolist())}
+    aligned = np.zeros((matrix.shape[0], len(labels)), dtype=float)
+    for local_index, label in enumerate(class_values):
+        if label in positions:
+            aligned[:, positions[label]] = matrix[:, local_index]
+    return aligned
+
+
 def _predict_for_validation(
     estimator: Pipeline,
     X: Any,
@@ -249,31 +272,116 @@ def _predict_for_validation(
     strategy: str,
     splits: Any,
     supports_probability: bool,
-) -> tuple[Any, Any, Pipeline]:
+    evaluation_groups: Any = None,
+    evaluation_unit: str = "record",
+) -> dict[str, Any]:
+    labels = np.unique(np.asarray(y))
     if strategy == "train_test_split":
-        train_index, test_index = splits[0]
-        fitted = clone(estimator).fit(X.iloc[train_index], y.iloc[train_index])
-        predictions = fitted.predict(X.iloc[test_index])
-        probabilities = (
-            fitted.predict_proba(X.iloc[test_index])
-            if supports_probability and hasattr(fitted, "predict_proba")
-            else None
-        )
-        y_true = y.iloc[test_index]
+        split_iterator = iter(splits)
     else:
         split_args = {"groups": groups} if groups is not None else {}
-        predictions = cross_val_predict(estimator, X, y, cv=splits, method="predict", **split_args)
-        probabilities = None
-        if supports_probability:
+        split_iterator = splits.split(X, y, **split_args)
+
+    index_chunks: list[np.ndarray] = []
+    prediction_chunks: list[np.ndarray] = []
+    probability_chunks: list[np.ndarray] = []
+    fold_metrics: list[dict[str, Any]] = []
+    all_folds_have_probabilities = supports_probability
+
+    for fold_number, (train_index, test_index) in enumerate(split_iterator, start=1):
+        fitted = clone(estimator).fit(X.iloc[train_index], y.iloc[train_index])
+        test_X = X.iloc[test_index]
+        test_y = y.iloc[test_index]
+        fold_predictions = np.asarray(fitted.predict(test_X))
+        fold_probabilities = None
+        if supports_probability and hasattr(fitted, "predict_proba"):
             try:
-                probabilities = cross_val_predict(
-                    estimator, X, y, cv=splits, method="predict_proba", **split_args
+                fold_probabilities = _align_probabilities(
+                    fitted.predict_proba(test_X),
+                    getattr(fitted, "classes_", None),
+                    labels,
                 )
             except (AttributeError, ValueError):
-                probabilities = None
-        y_true = y
+                fold_probabilities = None
+        if fold_probabilities is None:
+            all_folds_have_probabilities = False
+
+        index_chunks.append(np.asarray(test_index))
+        prediction_chunks.append(fold_predictions)
+        if fold_probabilities is not None:
+            probability_chunks.append(fold_probabilities)
+
+        fold_y_true: Any = test_y
+        fold_y_pred: Any = fold_predictions
+        fold_probability_values: Any = fold_probabilities
+        test_units = len(test_index)
+        if evaluation_groups is not None:
+            fold_groups = evaluation_groups.iloc[test_index]
+            grouped = aggregate_group_predictions(
+                test_y,
+                fold_predictions,
+                fold_groups,
+                fold_probabilities,
+                labels,
+            )
+            fold_y_true = grouped["y_true"]
+            fold_y_pred = grouped["y_pred"]
+            fold_probability_values = grouped["probabilities"]
+            test_units = len(grouped["y_true"])
+
+        fold_result = evaluate_predictions(
+            fold_y_true,
+            fold_y_pred,
+            fold_probability_values,
+        )
+        fold_metrics.append(
+            {
+                "fold": fold_number,
+                "test_samples": len(test_index),
+                "test_units": test_units,
+                "metrics": fold_result["metrics"],
+            }
+        )
+
+    combined_indices = np.concatenate(index_chunks)
+    combined_predictions = np.concatenate(prediction_chunks)
+    order = np.argsort(combined_indices)
+    ordered_indices = combined_indices[order]
+    sample_y_true = y.iloc[ordered_indices]
+    sample_predictions = combined_predictions[order]
+    sample_probabilities = None
+    if all_folds_have_probabilities and len(probability_chunks) == len(index_chunks):
+        sample_probabilities = np.vstack(probability_chunks)[order]
+
+    principal_y_true: Any = sample_y_true
+    principal_predictions: Any = sample_predictions
+    principal_probabilities: Any = sample_probabilities
+    if evaluation_groups is not None:
+        ordered_groups = evaluation_groups.iloc[ordered_indices]
+        grouped = aggregate_group_predictions(
+            sample_y_true,
+            sample_predictions,
+            ordered_groups,
+            sample_probabilities,
+            labels,
+        )
+        principal_y_true = grouped["y_true"]
+        principal_predictions = grouped["y_pred"]
+        principal_probabilities = grouped["probabilities"]
+
     final_estimator = clone(estimator).fit(X, y)
-    return (y_true, predictions, probabilities, final_estimator)
+    return {
+        "y_true": principal_y_true,
+        "predictions": principal_predictions,
+        "probabilities": principal_probabilities,
+        "sample_y_true": sample_y_true,
+        "sample_predictions": sample_predictions,
+        "sample_probabilities": sample_probabilities,
+        "probability_labels": labels,
+        "fold_metrics": fold_metrics,
+        "evaluation_unit": evaluation_unit if evaluation_groups is not None else "record",
+        "final_estimator": final_estimator,
+    }
 
 
 def _log_model(
@@ -585,7 +693,7 @@ def execute_candidate(
                     ("model", model_plugin.build(run.parameters, experiment.random_seed)),
                 ]
             )
-            y_true, predictions, probabilities, final_estimator = _predict_for_validation(
+            validation = _predict_for_validation(
                 estimator,
                 prepared["X"],
                 prepared["y"],
@@ -593,10 +701,35 @@ def execute_candidate(
                 prepared["validation_strategy_name"],
                 prepared["validation_splits"],
                 model_plugin.metadata.supports_probability,
+                evaluation_groups=prepared.get("evaluation_groups"),
+                evaluation_unit=prepared.get("evaluation_unit", "record"),
             )
+            final_estimator = validation["final_estimator"]
             run.stage = "evaluate"
-            result = evaluate_predictions(y_true, predictions, probabilities)
-            run.metrics = result["metrics"]
+            result = evaluate_predictions(
+                validation["y_true"],
+                validation["predictions"],
+                validation["probabilities"],
+            )
+            fold_summary = summarize_fold_metrics(validation["fold_metrics"])
+            run.metrics = dict(result["metrics"])
+            run.metrics["_evaluation_unit"] = validation["evaluation_unit"]
+            run.metrics["_fold_count"] = len(validation["fold_metrics"])
+            if len(validation["fold_metrics"]) > 1:
+                for metric_name, values in fold_summary.items():
+                    run.metrics[f"cv_mean_{metric_name}"] = values["mean"]
+                    run.metrics[f"cv_std_{metric_name}"] = values["std"]
+
+            sample_result = None
+            if validation["evaluation_unit"] != "record":
+                sample_result = evaluate_predictions(
+                    validation["sample_y_true"],
+                    validation["sample_predictions"],
+                    validation["sample_probabilities"],
+                )
+                secondary_prefix = "epoch" if validation["evaluation_unit"] == "subject" else "sample"
+                for metric_name, value in sample_result["metrics"].items():
+                    run.metrics[f"{secondary_prefix}_{metric_name}"] = value
             mlflow.log_params(
                 {
                     "dataset_id": dataset.id,
@@ -610,7 +743,13 @@ def execute_candidate(
                     "source_commit": parent_config["source_commit"],
                 }
             )
-            mlflow.log_metrics(run.metrics)
+            mlflow.log_metrics(
+                {
+                    key: float(value)
+                    for key, value in run.metrics.items()
+                    if not key.startswith("_") and isinstance(value, (int, float, np.number))
+                }
+            )
             run.stage = "save_artifacts"
             model_dir = settings.artifacts_dir / experiment.id / run.model_id
             model_dir.mkdir(parents=True, exist_ok=True)
@@ -623,15 +762,49 @@ def execute_candidate(
             _write_json(
                 model_dir / "classification_report.json", result["classification_report"]
             )
+            _write_json(model_dir / "fold_metrics.json", validation["fold_metrics"])
+            _write_json(
+                model_dir / "validation_summary.json",
+                {
+                    "evaluation_unit": validation["evaluation_unit"],
+                    "fold_count": len(validation["fold_metrics"]),
+                    "global_metrics": result["metrics"],
+                    "fold_summary": fold_summary,
+                    "secondary_metrics": sample_result["metrics"] if sample_result else None,
+                },
+            )
             _write_json(model_dir / "feature_names.json", prepared["feature_names"])
             _write_json(model_dir / "dataset_summary.json", dataset_summary)
             _write_json(model_dir / "environment.json", parent_config["dependency_versions"])
             _plot_confusion(
                 model_dir / "confusion_matrix.png",
                 result["confusion_matrix"],
-                [str(value) for value in sorted(set(y_true), key=str)],
+                [str(value) for value in sorted(set(validation["y_true"]), key=str)],
             )
-            has_roc_curve = _plot_roc(model_dir / "roc_curve.png", y_true, probabilities)
+            has_roc_curve = _plot_roc(
+                model_dir / "roc_curve.png",
+                validation["y_true"],
+                validation["probabilities"],
+            )
+            has_secondary_roc = False
+            if sample_result is not None:
+                _write_json(
+                    model_dir / "epoch_classification_report.json",
+                    sample_result["classification_report"],
+                )
+                _plot_confusion(
+                    model_dir / "epoch_confusion_matrix.png",
+                    sample_result["confusion_matrix"],
+                    [
+                        str(value)
+                        for value in sorted(set(validation["sample_y_true"]), key=str)
+                    ],
+                )
+                has_secondary_roc = _plot_roc(
+                    model_dir / "epoch_roc_curve.png",
+                    validation["sample_y_true"],
+                    validation["sample_probabilities"],
+                )
             mlflow.log_artifacts(str(model_dir), artifact_path="artifacts")
             logged_model = _log_model(final_estimator, prepared["X"])
             run.candidate = ModelCandidate(
@@ -641,6 +814,8 @@ def execute_candidate(
             artifact_specs = [
                 ("configuration.json", "configuration"),
                 ("classification_report.json", "report"),
+                ("fold_metrics.json", "validation"),
+                ("validation_summary.json", "validation"),
                 ("feature_names.json", "features"),
                 ("dataset_summary.json", "dataset_summary"),
                 ("environment.json", "environment"),
@@ -648,6 +823,15 @@ def execute_candidate(
             ]
             if has_roc_curve:
                 artifact_specs.append(("roc_curve.png", "plot"))
+            if sample_result is not None:
+                artifact_specs.extend(
+                    [
+                        ("epoch_classification_report.json", "report"),
+                        ("epoch_confusion_matrix.png", "plot"),
+                    ]
+                )
+                if has_secondary_roc:
+                    artifact_specs.append(("epoch_roc_curve.png", "plot"))
             for artifact_name, kind in artifact_specs:
                 db.add(
                     ArtifactReference(

@@ -188,22 +188,30 @@ def _aggregate_eeg_result(
     values = [_python_value(value) for value in np.asarray(predictions).tolist()]
     if not values:
         raise ValidationError("El registro EEG no produjo predicciones")
-    counts = Counter(str(value) for value in values)
+    counts = Counter(values)
     winner = counts.most_common(1)[0][0]
     result: dict[str, Any] = {
         "recording": recording,
-        "prediction": winner,
+        "prediction": _python_value(winner),
         "epochs_analyzed": len(values),
-        "class_distribution": dict(counts),
+        "class_distribution": {str(label): count for label, count in counts.items()},
         "aggregation": "majority_vote",
     }
     if probabilities is not None and classes is not None:
         matrix = np.asarray(probabilities, dtype=float)
-        if matrix.ndim == 2 and matrix.shape[0] == len(values):
+        class_values = np.asarray(classes)
+        if (
+            matrix.ndim == 2
+            and matrix.shape[0] == len(values)
+            and matrix.shape[1] == len(class_values)
+        ):
             means = matrix.mean(axis=0)
+            winner_index = int(np.argmax(means))
+            result["prediction"] = _python_value(class_values[winner_index])
+            result["aggregation"] = "mean_probability"
             result["mean_probabilities"] = {
                 str(label): float(score)
-                for label, score in zip(classes, means, strict=False)
+                for label, score in zip(class_values, means, strict=False)
             }
     return result
 
@@ -276,7 +284,7 @@ def perform_prediction(
                 classes = getattr(model, "classes_", None)
                 if classes is not None:
                     payload["classes"] = [str(value) for value in classes]
-            except AttributeError:
+            except (AttributeError, ValueError):
                 pass
 
     job.result_payload = payload

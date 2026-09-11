@@ -75,7 +75,11 @@ def make_validation_split(
     raise ValidationError(f"Estrategia de validación no soportada: {strategy}")
 
 
-def evaluate_predictions(y_true: Any, y_pred: Any, probabilities: Any = None) -> dict[str, Any]:
+def classification_metrics(
+    y_true: Any,
+    y_pred: Any,
+    probabilities: Any = None,
+) -> dict[str, float]:
     metrics: dict[str, float] = {
         "accuracy": float(accuracy_score(y_true, y_pred)),
         "balanced_accuracy": float(balanced_accuracy_score(y_true, y_pred)),
@@ -86,21 +90,113 @@ def evaluate_predictions(y_true: Any, y_pred: Any, probabilities: Any = None) ->
     }
     if probabilities is not None:
         try:
-            probabilities = np.asarray(probabilities)
+            probability_matrix = np.asarray(probabilities, dtype=float)
             labels = np.unique(y_true)
             if len(labels) == 2:
-                score = probabilities[:, 1] if np.ndim(probabilities) == 2 else probabilities
+                score = (
+                    probability_matrix[:, 1]
+                    if probability_matrix.ndim == 2
+                    else probability_matrix
+                )
                 metrics["roc_auc"] = float(roc_auc_score(y_true, score))
             else:
                 metrics["roc_auc"] = float(
-                    roc_auc_score(y_true, probabilities, multi_class="ovr", average="macro")
+                    roc_auc_score(
+                        y_true,
+                        probability_matrix,
+                        multi_class="ovr",
+                        average="macro",
+                    )
                 )
-        except ValueError:
+        except (IndexError, ValueError):
             pass
+    return metrics
+
+
+def evaluate_predictions(y_true: Any, y_pred: Any, probabilities: Any = None) -> dict[str, Any]:
     return {
-        "metrics": metrics,
+        "metrics": classification_metrics(y_true, y_pred, probabilities),
         "confusion_matrix": confusion_matrix(y_true, y_pred).tolist(),
         "classification_report": classification_report(
             y_true, y_pred, output_dict=True, zero_division=0
         ),
     }
+
+
+def aggregate_group_predictions(
+    y_true: Any,
+    y_pred: Any,
+    groups: Any,
+    probabilities: Any = None,
+    probability_labels: Any = None,
+) -> dict[str, Any]:
+    true_values = np.asarray(y_true)
+    predicted_values = np.asarray(y_pred)
+    group_values = np.asarray(groups)
+    if not (len(true_values) == len(predicted_values) == len(group_values)):
+        raise ValidationError("Las predicciones agrupadas no tienen longitudes compatibles")
+
+    probability_matrix = None
+    labels = None
+    if probabilities is not None and probability_labels is not None:
+        probability_matrix = np.asarray(probabilities, dtype=float)
+        labels = np.asarray(probability_labels)
+        if probability_matrix.ndim != 2 or probability_matrix.shape[0] != len(true_values):
+            probability_matrix = None
+            labels = None
+
+    ordered_groups = list(dict.fromkeys(group_values.tolist()))
+    aggregated_true: list[Any] = []
+    aggregated_predicted: list[Any] = []
+    aggregated_probabilities: list[np.ndarray] = []
+
+    for group in ordered_groups:
+        positions = np.flatnonzero(group_values == group)
+        group_true = np.unique(true_values[positions])
+        if len(group_true) != 1:
+            raise ValidationError(
+                f"El grupo {group} contiene más de una etiqueta objetivo y no puede agregarse"
+            )
+        aggregated_true.append(group_true[0])
+
+        if probability_matrix is not None and labels is not None:
+            mean_probabilities = probability_matrix[positions].mean(axis=0)
+            aggregated_probabilities.append(mean_probabilities)
+            aggregated_predicted.append(labels[int(np.argmax(mean_probabilities))])
+        else:
+            values, counts = np.unique(predicted_values[positions], return_counts=True)
+            aggregated_predicted.append(values[int(np.argmax(counts))])
+
+    return {
+        "groups": np.asarray(ordered_groups),
+        "y_true": np.asarray(aggregated_true),
+        "y_pred": np.asarray(aggregated_predicted),
+        "probabilities": (
+            np.vstack(aggregated_probabilities) if aggregated_probabilities else None
+        ),
+    }
+
+
+def summarize_fold_metrics(folds: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
+    metric_names = sorted(
+        {
+            name
+            for fold in folds
+            for name, value in fold.get("metrics", {}).items()
+            if isinstance(value, (int, float, np.number))
+        }
+    )
+    summary: dict[str, dict[str, float]] = {}
+    for name in metric_names:
+        values = [
+            float(fold["metrics"][name])
+            for fold in folds
+            if name in fold.get("metrics", {})
+        ]
+        if not values:
+            continue
+        summary[name] = {
+            "mean": float(np.mean(values)),
+            "std": float(np.std(values, ddof=0)),
+        }
+    return summary

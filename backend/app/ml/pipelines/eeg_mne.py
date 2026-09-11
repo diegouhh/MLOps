@@ -223,6 +223,8 @@ class BasicEegMnePipeline(PipelinePlugin):
             "X": X,
             "y": y,
             "groups": groups,
+            "evaluation_groups": groups,
+            "evaluation_unit": "subject",
             "preprocessor": "passthrough",
             "feature_names": X.columns.tolist(),
             "numeric_features": X.columns.tolist(),

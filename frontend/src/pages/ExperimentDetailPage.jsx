@@ -30,6 +30,80 @@ function defaultModelName(experiment, run) {
   return base.toLowerCase().replace(/[^a-z0-9._ -]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 200)
 }
 
+const metricLabels = {
+  accuracy: 'Accuracy',
+  balanced_accuracy: 'Balanced accuracy',
+  precision_macro: 'Precision macro',
+  recall_macro: 'Recall macro',
+  f1_macro: 'F1 macro',
+  f1_weighted: 'F1 weighted',
+  roc_auc: 'ROC AUC',
+}
+
+function MetricTiles({ entries, cv = false }) {
+  if (!entries.length) return null
+  return (
+    <div className="metrics-grid">
+      {entries.map(([metric, value, deviation]) => (
+        <div className="metric-tile" key={metric}>
+          <span>{metricLabels[metric] || titleCase(metric)}</span>
+          <strong>
+            {formatMetric(value)}{cv && deviation !== undefined ? ` ± ${formatMetric(deviation)}` : ''}
+          </strong>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function RunMetrics({ metrics = {} }) {
+  const evaluationUnit = metrics._evaluation_unit || 'record'
+  const primary = Object.entries(metrics)
+    .filter(([key, value]) => (
+      !key.startsWith('_')
+      && !key.startsWith('cv_')
+      && !key.startsWith('epoch_')
+      && !key.startsWith('sample_')
+      && Number.isFinite(Number(value))
+    ))
+    .map(([key, value]) => [key, value])
+  const cv = Object.entries(metrics)
+    .filter(([key]) => key.startsWith('cv_mean_'))
+    .map(([key, value]) => {
+      const metric = key.replace('cv_mean_', '')
+      return [metric, value, metrics[`cv_std_${metric}`]]
+    })
+  const secondaryPrefix = evaluationUnit === 'subject' ? 'epoch_' : 'sample_'
+  const secondary = Object.entries(metrics)
+    .filter(([key, value]) => key.startsWith(secondaryPrefix) && Number.isFinite(Number(value)))
+    .map(([key, value]) => [key.replace(secondaryPrefix, ''), value])
+
+  return (
+    <>
+      {primary.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <Text strong>
+            Evaluación principal{evaluationUnit === 'subject' ? ' · Por sujeto' : ''}
+          </Text>
+          <MetricTiles entries={primary} />
+        </div>
+      )}
+      {cv.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <Text strong>Estabilidad entre folds</Text>
+          <MetricTiles entries={cv} cv />
+        </div>
+      )}
+      {secondary.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <Text strong>Evaluación secundaria · Por época</Text>
+          <MetricTiles entries={secondary} />
+        </div>
+      )}
+    </>
+  )
+}
+
 export default function ExperimentDetailPage() {
   const { experimentId } = useParams()
   const navigate = useNavigate()
@@ -115,7 +189,7 @@ export default function ExperimentDetailPage() {
                 <Text type="secondary">Etapa: {titleCase(run.stage)}</Text>
                 <Progress percent={stageProgress[run.stage] || (run.status === 'running' ? 70 : 10)} status={run.status === 'failed' ? 'exception' : run.status === 'completed' ? 'success' : 'active'} size="small" />
                 {run.error_message && <Alert type="error" showIcon message={run.error_message} style={{ marginTop: 10 }} />}
-                <div className="metrics-grid">{Object.entries(run.metrics || {}).map(([metric, value]) => <div className="metric-tile" key={metric}><span>{titleCase(metric)}</span><strong>{formatMetric(value)}</strong></div>)}</div>
+                <RunMetrics metrics={run.metrics || {}} />
                 <Space wrap style={{ marginTop: 16 }}>
                   {runLink ? <Button href={runLink} target="_blank" icon={<ExperimentOutlined />}>Ver en MLflow</Button> : <Tooltip title="El run aparecerá cuando MLflow lo cree"><Button disabled>Ver en MLflow</Button></Tooltip>}
                   {run.status === 'completed' && run.candidate_id && <Button type="primary" onClick={() => openRegistration(run)}>Registrar / promover</Button>}

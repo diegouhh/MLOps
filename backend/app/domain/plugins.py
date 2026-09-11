@@ -43,9 +43,8 @@ class ModelMetadata:
     required_packages: list[str] = field(default_factory=list)
     family: str = "other"
     interpretability: str = "medium"
-    compute_cost: str = "medium"
-    strengths: list[str] = field(default_factory=list)
-    limitations: list[str] = field(default_factory=list)
+    training_cost: str = "medium"
+    inference_cost: str = "medium"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

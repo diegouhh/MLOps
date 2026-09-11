@@ -60,10 +60,17 @@ def test_catalog_metadata_is_descriptive_and_filterable():
 
     assert logistic.family == "linear"
     assert logistic.interpretability == "high"
-    assert logistic.compute_cost == "low"
-    assert logistic.strengths
-    assert logistic.limitations
+    assert logistic.training_cost == "low"
+    assert logistic.inference_cost == "low"
 
     assert random_forest.family == "ensemble"
     assert random_forest.interpretability == "medium"
-    assert random_forest.compute_cost == "medium"
+    assert random_forest.training_cost == "medium"
+    assert random_forest.inference_cost == "medium"
+
+    svm = model_registry.get("svm").metadata
+    knn = model_registry.get("knn").metadata
+    assert svm.interpretability == "low"
+    assert svm.training_cost == "high"
+    assert knn.training_cost == "low"
+    assert knn.inference_cost == "high"
