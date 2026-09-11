@@ -43,3 +43,27 @@ def test_pipeline_configuration_validation():
     with pytest.raises(ValidationError, match="no permitidos"):
         pipeline.validate_config({"target_column": "species", "callable": "os.system"})
     assert pipeline.validate_config({"target_column": "species"})["scale_numeric"] is True
+
+# NeuroOps catalogs v2
+
+
+def test_catalog_metadata_is_descriptive_and_filterable():
+    tabular = pipeline_registry.get("tabular_basic").metadata
+    eeg = pipeline_registry.get("eeg_mne_basic").metadata
+    logistic = model_registry.get("logistic_regression").metadata
+    random_forest = model_registry.get("random_forest").metadata
+
+    assert tabular.task_types == ["classification"]
+    assert tabular.input_label == "CSV tabular"
+    assert tabular.category == "Preparación tabular"
+    assert eeg.input_label == "BIDS EEG"
+
+    assert logistic.family == "linear"
+    assert logistic.interpretability == "high"
+    assert logistic.compute_cost == "low"
+    assert logistic.strengths
+    assert logistic.limitations
+
+    assert random_forest.family == "ensemble"
+    assert random_forest.interpretability == "medium"
+    assert random_forest.compute_cost == "medium"

@@ -32,7 +32,7 @@ export default function NewExperimentPage() {
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [name, setName] = useState('')
-  const [datasetId, setDatasetId] = useState('')
+  const [datasetId, setDatasetId] = useState(searchParams.get('dataset') || '')
   const [pipelineId, setPipelineId] = useState(searchParams.get('pipeline') || '')
   const [pipelineConfig, setPipelineConfig] = useState({})
   const [registeredModelName, setRegisteredModelName] = useState('')
@@ -44,19 +44,37 @@ export default function NewExperimentPage() {
   const pipeline = (pipelines.data || []).find((item) => item.id === pipelineId)
   const columns = dataset?.versions.at(-1)?.schema_summary?.columns || []
   const compatiblePipelines = (pipelines.data || []).filter((item) => item.available && (!dataset || item.data_type === dataset.data_type))
-  const compatibleModels = (models.data || []).filter((item) => item.available && (!pipeline?.supported_models.length || pipeline.supported_models.includes(item.id)))
+  const compatibleModels = (models.data || []).filter(
+    (item) => item.available && (!pipeline || pipeline.supported_models.includes(item.id)),
+  )
   const isEegPipeline = pipeline?.data_type === 'eeg_bids'
 
   useEffect(() => {
-    const requested = searchParams.get('model')
-    if (!requested || !models.data?.some((item) => item.id === requested) || selectedModels.length) return
-    const model = models.data.find((item) => item.id === requested)
-    setSelectedModels([requested])
-    setModelParameters({ [requested]: { ...model.default_parameters } })
+    if (!models.data || selectedModels.length) return
+    const requestedMany = (searchParams.get('models') || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean)
+    const requestedOne = searchParams.get('model')
+    const requested = requestedMany.length
+      ? requestedMany
+      : [requestedOne].filter(Boolean)
+    const selected = requested
+      .map((modelId) => models.data.find((item) => item.id === modelId))
+      .filter(Boolean)
+    if (!selected.length) return
+    const unique = [...new Map(selected.map((item) => [item.id, item])).values()]
+    setSelectedModels(unique.map((item) => item.id))
+    setModelParameters(Object.fromEntries(
+      unique.map((item) => [item.id, { ...item.default_parameters }]),
+    ))
   }, [models.data, searchParams, selectedModels.length])
 
   useEffect(() => {
     if (!pipeline) return
+    setSelectedModels((current) => current.filter(
+      (modelId) => pipeline.supported_models.includes(modelId),
+    ))
     setPipelineConfig((current) => Object.keys(current).length ? current : schemaDefaults(pipeline.config_schema))
     if (pipeline.data_type === 'eeg_bids') {
       setValidation((current) => ['group_kfold', 'stratified_group_kfold'].includes(current.strategy)
@@ -70,7 +88,9 @@ export default function NewExperimentPage() {
     setPipelineId(id)
     setPipelineConfig(schemaDefaults(next?.config_schema))
     setRegisteredModelName(`neuroops-${id}`)
-    setSelectedModels((current) => current.filter((modelId) => !next?.supported_models.length || next.supported_models.includes(modelId)))
+    setSelectedModels((current) => current.filter(
+      (modelId) => !next || next.supported_models.includes(modelId),
+    ))
   }
 
   function toggleModel(model, checked) {

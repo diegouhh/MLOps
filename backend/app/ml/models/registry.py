@@ -60,6 +60,19 @@ class LogisticRegressionPlugin(SklearnModelPlugin):
         display_name="Regresión logística",
         description="Clasificador lineal interpretable y reproducible.",
         task_types=["classification"],
+        family="linear",
+        interpretability="high",
+        compute_cost="low",
+        strengths=[
+            "Baseline rápido y reproducible",
+            "Coeficientes fáciles de inspeccionar",
+            "Probabilidades disponibles",
+        ],
+        limitations=[
+            "La frontera de decisión es lineal",
+            "Puede requerir escalado de variables",
+            "Puede ser sensible a variables muy correlacionadas",
+        ],
         default_parameters={"C": 1.0, "max_iter": 1000, "class_weight": None},
         editable_parameters=["C", "max_iter", "class_weight"],
         parameter_schema={
@@ -82,6 +95,19 @@ class RandomForestPlugin(SklearnModelPlugin):
         display_name="Random Forest",
         description="Ensamble robusto de árboles de decisión.",
         task_types=["classification"],
+        family="ensemble",
+        interpretability="medium",
+        compute_cost="medium",
+        strengths=[
+            "Captura relaciones no lineales",
+            "No depende fuertemente del escalado",
+            "Permite inspeccionar importancia de variables",
+        ],
+        limitations=[
+            "Es menos interpretable que un modelo lineal",
+            "Muchos árboles aumentan memoria y costo",
+            "Las probabilidades pueden requerir calibración",
+        ],
         default_parameters={
             "n_estimators": 200,
             "max_depth": None,
@@ -110,6 +136,19 @@ class SvmPlugin(SklearnModelPlugin):
         display_name="Support Vector Machine",
         description="Clasificador de margen máximo con kernels controlados.",
         task_types=["classification"],
+        family="kernel",
+        interpretability="medium",
+        compute_cost="medium",
+        strengths=[
+            "Funciona bien en espacios de muchas variables",
+            "Los kernels permiten fronteras no lineales",
+            "Ofrece control explícito de regularización",
+        ],
+        limitations=[
+            "Es sensible al escalado de variables",
+            "Puede ser costoso con datasets grandes",
+            "Calcular probabilidades añade trabajo adicional",
+        ],
         default_parameters={"C": 1.0, "kernel": "rbf", "gamma": "scale", "probability": True},
         editable_parameters=["C", "kernel", "gamma", "probability"],
         parameter_schema={
@@ -133,6 +172,19 @@ class KnnPlugin(SklearnModelPlugin):
         display_name="K-Nearest Neighbors",
         description="Clasificación por vecinos cercanos.",
         task_types=["classification"],
+        family="neighbors",
+        interpretability="medium",
+        compute_cost="medium",
+        strengths=[
+            "Concepto simple de entender",
+            "No impone una frontera paramétrica",
+            "Es útil como baseline basado en cercanía",
+        ],
+        limitations=[
+            "La inferencia crece con el tamaño del dataset",
+            "Es sensible al escalado y a la métrica de distancia",
+            "Puede degradarse con alta dimensionalidad",
+        ],
         default_parameters={"n_neighbors": 5, "weights": "uniform", "p": 2},
         editable_parameters=["n_neighbors", "weights", "p"],
         parameter_schema={
@@ -155,6 +207,19 @@ class GradientBoostingPlugin(SklearnModelPlugin):
         display_name="Gradient Boosting",
         description="Ensamble secuencial de árboles ligeros.",
         task_types=["classification"],
+        family="ensemble",
+        interpretability="medium",
+        compute_cost="medium",
+        strengths=[
+            "Captura no linealidades e interacciones",
+            "Suele ser competitivo en datos tabulares",
+            "Ofrece probabilidades de clasificación",
+        ],
+        limitations=[
+            "Es sensible a varios hiperparámetros",
+            "El entrenamiento es secuencial",
+            "Es menos interpretable que un modelo lineal",
+        ],
         default_parameters={"n_estimators": 100, "learning_rate": 0.1, "max_depth": 3},
         editable_parameters=["n_estimators", "learning_rate", "max_depth"],
         parameter_schema={

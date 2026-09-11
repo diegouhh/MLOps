@@ -21,6 +21,9 @@ class SovaharmonyPipeline(PipelinePlugin):
             ),
             version="0.1.0",
             data_type="eeg_bids",
+            task_types=["preprocessing"],
+            input_label="BIDS EEG",
+            category="Preprocesamiento EEG",
             available=available,
             unavailable_reason=None
             if available

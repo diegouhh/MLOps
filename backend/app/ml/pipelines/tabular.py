@@ -21,6 +21,9 @@ class BasicTabularPipeline(PipelinePlugin):
         description="CSV con imputación, escalado y codificación sin fuga de información.",
         version="1.0.0",
         data_type="tabular",
+        task_types=["classification"],
+        input_label="CSV tabular",
+        category="Preparación tabular",
         supported_models=[
             "logistic_regression",
             "random_forest",

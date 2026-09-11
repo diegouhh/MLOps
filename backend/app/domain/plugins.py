@@ -19,6 +19,9 @@ class PipelineMetadata:
     supported_models: list[str] = field(default_factory=list)
     config_schema: dict[str, Any] = field(default_factory=dict)
     steps: list[str] = field(default_factory=list)
+    task_types: list[str] = field(default_factory=list)
+    input_label: str | None = None
+    category: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -38,6 +41,11 @@ class ModelMetadata:
     available: bool = True
     unavailable_reason: str | None = None
     required_packages: list[str] = field(default_factory=list)
+    family: str = "other"
+    interpretability: str = "medium"
+    compute_cost: str = "medium"
+    strengths: list[str] = field(default_factory=list)
+    limitations: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
