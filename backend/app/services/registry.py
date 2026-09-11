@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Any
 
+import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,6 +17,8 @@ from app.db.models import (
 )
 from app.services.datasets import get_dataset
 from app.services.experiments import get_experiment
+
+EEG_PREDICTION_EXTENSIONS = {".edf", ".bdf", ".vhdr", ".set"}
 
 
 def get_model_reference(db: Session, name: str, version_or_alias: str) -> RegisteredModelReference:
@@ -68,27 +72,141 @@ def _input_type(dtype: str) -> tuple[str, Any]:
     return "string", ""
 
 
+def _dataset_version(dataset: Dataset, version: int):
+    current = next((item for item in dataset.versions if item.version == version), None)
+    if not current:
+        raise ValidationError(f"La versión v{version} del dataset no está disponible")
+    return current
+
+
+def _json_value(value: Any) -> Any:
+    if pd.isna(value):
+        return None
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except ValueError:
+            pass
+    return value
+
+
+def _tabular_examples(storage_path: str, columns: list[str], limit: int = 12) -> list[dict[str, Any]]:
+    try:
+        frame = pd.read_csv(storage_path, usecols=columns)
+    except Exception:
+        return []
+    examples: list[dict[str, Any]] = []
+    for _, row in frame.head(200).iterrows():
+        record = {column: _json_value(row[column]) for column in columns}
+        if any(value is None for value in record.values()):
+            continue
+        examples.append(record)
+        if len(examples) >= limit:
+            break
+    return examples
+
+
+def _bids_entities(relative_path: Path) -> dict[str, str | None]:
+    entities: dict[str, str] = {}
+    for part in (*relative_path.parts[:-1], relative_path.stem):
+        for token in part.split("_"):
+            if "-" not in token:
+                continue
+            key, value = token.split("-", 1)
+            if key in {"sub", "ses", "task", "run"} and value:
+                entities.setdefault(key, value)
+    return {
+        "subject": entities.get("sub"),
+        "session": entities.get("ses"),
+        "task": entities.get("task"),
+        "run": entities.get("run"),
+    }
+
+
+def _list_eeg_recordings(storage_path: str) -> list[dict[str, Any]]:
+    root = Path(storage_path).resolve()
+    if not root.is_dir():
+        return []
+    recordings: list[dict[str, Any]] = []
+    for path in sorted(root.rglob("*_eeg.*")):
+        if not path.is_file() or path.suffix.lower() not in EEG_PREDICTION_EXTENSIONS:
+            continue
+        try:
+            relative = path.resolve().relative_to(root)
+        except ValueError:
+            continue
+        if "derivatives" in relative.parts:
+            continue
+        entities = _bids_entities(relative)
+        label_parts = []
+        if entities["subject"]:
+            label_parts.append(f"Sujeto {entities['subject']}")
+        if entities["session"]:
+            label_parts.append(f"Sesión {entities['session']}")
+        if entities["task"]:
+            label_parts.append(f"Tarea {entities['task']}")
+        if entities["run"]:
+            label_parts.append(f"Run {entities['run']}")
+        recordings.append(
+            {
+                "value": relative.as_posix(),
+                "label": " - ".join(label_parts) or relative.name,
+                "subject": entities["subject"],
+                "session": entities["session"],
+                "task": entities["task"],
+                "run": entities["run"],
+            }
+        )
+    return recordings
+
+
 def reference_input_schema(db: Session, reference: RegisteredModelReference) -> dict[str, Any]:
     experiment = get_experiment(db, reference.experiment_id)
     dataset = get_dataset(db, experiment.dataset_id)
-    current = next(
-        (item for item in dataset.versions if item.version == experiment.dataset_version),
-        None,
-    )
-    summary = current.schema_summary if current and current.schema_summary else {}
+    current = _dataset_version(dataset, experiment.dataset_version)
+    config = experiment.pipeline_config or {}
+
+    common = {
+        "model_name": reference.name,
+        "version": reference.version,
+        "alias": reference.alias,
+        "experiment_id": experiment.id,
+        "experiment_name": experiment.name,
+        "dataset_id": dataset.id,
+        "dataset_name": dataset.name,
+        "dataset_version": experiment.dataset_version,
+        "data_type": dataset.data_type,
+        "pipeline_id": experiment.pipeline_id,
+        "target_column": config.get("target_column"),
+    }
+
+    if dataset.data_type == "eeg_bids":
+        recordings = _list_eeg_recordings(current.storage_path)
+        return {
+            **common,
+            "input_mode": "eeg_recording",
+            "fields": [],
+            "example": {},
+            "examples": [],
+            "recordings": recordings,
+            "help": (
+                "Selecciona un registro EEG. NeuroOps aplicará automáticamente el mismo "
+                "preprocesamiento y extracción de características usados durante el entrenamiento."
+            ),
+        }
+
+    summary = current.schema_summary if current.schema_summary else {}
     columns = list(summary.get("columns", []))
     dtypes = dict(summary.get("dtypes", {}))
-    config = experiment.pipeline_config or {}
     excluded = {
         config.get("target_column"),
         config.get("group_column"),
         *config.get("drop_columns", []),
     }
+    feature_columns = [column for column in columns if column not in excluded]
     fields = []
     example: dict[str, Any] = {}
-    for column in columns:
-        if column in excluded:
-            continue
+    for column in feature_columns:
         field_type, default = _input_type(str(dtypes.get(column, "string")))
         fields.append(
             {
@@ -100,17 +218,20 @@ def reference_input_schema(db: Session, reference: RegisteredModelReference) -> 
             }
         )
         example[column] = default
+    examples = _tabular_examples(current.storage_path, feature_columns)
+    if examples:
+        example = examples[0]
     return {
-        "model_name": reference.name,
-        "version": reference.version,
-        "alias": reference.alias,
-        "dataset_id": dataset.id,
-        "dataset_name": dataset.name,
-        "dataset_version": experiment.dataset_version,
-        "data_type": dataset.data_type,
-        "target_column": config.get("target_column"),
+        **common,
+        "input_mode": "tabular",
         "fields": fields,
         "example": example,
+        "examples": examples,
+        "recordings": [],
+        "help": (
+            "NeuroOps cargó ejemplos reales del dataset para que puedas probar el modelo "
+            "sin escribir todas las variables manualmente."
+        ),
     }
 
 
@@ -120,6 +241,19 @@ def validate_prediction_records(
     records: list[dict[str, Any]],
 ) -> dict[str, Any]:
     schema = reference_input_schema(db, reference)
+    if schema["input_mode"] == "eeg_recording":
+        allowed = {item["value"] for item in schema["recordings"]}
+        if not allowed:
+            raise ValidationError("El dataset no contiene registros EEG disponibles para predicción")
+        for index, record in enumerate(records, start=1):
+            if set(record) != {"recording"}:
+                raise ValidationError(
+                    f"Registro {index}: selecciona únicamente un registro EEG válido"
+                )
+            if record["recording"] not in allowed:
+                raise ValidationError(f"Registro {index}: el registro EEG no pertenece al dataset")
+        return schema
+
     fields = {field["name"]: field for field in schema["fields"]}
     if not fields:
         raise ValidationError("El modelo no expone un esquema de entrada compatible")

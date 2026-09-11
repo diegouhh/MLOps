@@ -35,9 +35,7 @@ class BasicEegMnePipeline(PipelinePlugin):
             version="1.0.0",
             data_type="eeg_bids",
             available=available,
-            unavailable_reason=None
-            if available
-            else "Faltan MNE y MNE-BIDS.",
+            unavailable_reason=None if available else "Faltan MNE y MNE-BIDS.",
             required_packages=["mne", "mne-bids"],
             supported_models=[
                 "logistic_regression",
@@ -127,9 +125,7 @@ class BasicEegMnePipeline(PipelinePlugin):
         table = pd.read_csv(participants, sep="\t")
         if config["target_column"] not in table.columns:
             raise ValidationError(f"participants.tsv no contiene {config['target_column']}")
-        eeg_files = [
-            path for path in root.rglob("*_eeg.*") if _is_raw_eeg_file(root, path)
-        ]
+        eeg_files = [path for path in root.rglob("*_eeg.*") if _is_raw_eeg_file(root, path)]
         if not eeg_files:
             raise ValidationError("No se encontraron archivos EEG compatibles en BIDS")
         return {"subjects": int(table.shape[0]), "eeg_files": len(eeg_files)}
@@ -157,7 +153,12 @@ class BasicEegMnePipeline(PipelinePlugin):
         if not paths:
             raise ValidationError("La selección no coincide con registros EEG")
         participants = pd.read_csv(root / "participants.tsv", sep="\t")
-        return {"root": root, "paths": paths, "participants": participants, "reader": read_raw_bids}
+        return {
+            "root": root,
+            "paths": paths,
+            "participants": participants,
+            "reader": read_raw_bids,
+        }
 
     def preprocess(self, data: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
         processed = []
@@ -224,3 +225,54 @@ class BasicEegMnePipeline(PipelinePlugin):
             "numeric_features": X.columns.tolist(),
             "categorical_features": [],
         }
+
+    def build_prediction_features(
+        self,
+        dataset_path: str,
+        config: dict[str, Any],
+        recording: str,
+    ) -> pd.DataFrame:
+        """Apply the training EEG preprocessing to one BIDS recording for inference."""
+        self._require()
+        normalized = self.validate_config(config)
+        root = Path(dataset_path).resolve()
+        if not root.is_dir():
+            raise ValidationError("El dataset EEG ya no está disponible")
+        raw_relative = Path(recording)
+        if raw_relative.is_absolute() or ".." in raw_relative.parts:
+            raise ValidationError("El registro EEG seleccionado no es válido")
+        selected_file = (root / raw_relative).resolve()
+        try:
+            selected_file.relative_to(root)
+        except ValueError as exc:
+            raise ValidationError("El registro EEG sale del dataset") from exc
+        if not _is_raw_eeg_file(root, selected_file):
+            raise ValidationError("El archivo seleccionado no es un registro EEG compatible")
+
+        from mne_bids import find_matching_paths, read_raw_bids
+
+        discovered = find_matching_paths(
+            root,
+            datatypes="eeg",
+            suffixes="eeg",
+            extensions=sorted(SUPPORTED_EEG_EXTENSIONS),
+            ignore_json=True,
+        )
+        bids_path = next(
+            (
+                candidate
+                for candidate in discovered
+                if Path(candidate.fpath).resolve() == selected_file
+            ),
+            None,
+        )
+        if bids_path is None:
+            raise ValidationError("El registro seleccionado no pudo resolverse como BIDS EEG")
+
+        data = {"root": root, "paths": [bids_path], "reader": read_raw_bids}
+        processed = self.preprocess(data, normalized)
+        featured = self.extract_features(processed, normalized)
+        frame = featured["features"].drop(columns=["subject", "epoch"], errors="ignore")
+        if frame.empty:
+            raise ValidationError("El registro EEG no produjo características para inferencia")
+        return frame
