@@ -274,6 +274,7 @@ def _predict_for_validation(
     supports_probability: bool,
     evaluation_groups: Any = None,
     evaluation_unit: str = "record",
+    sample_unit: str = "sample",
 ) -> dict[str, Any]:
     labels = np.unique(np.asarray(y))
     if strategy == "train_test_split":
@@ -380,6 +381,7 @@ def _predict_for_validation(
         "probability_labels": labels,
         "fold_metrics": fold_metrics,
         "evaluation_unit": evaluation_unit if evaluation_groups is not None else "record",
+        "sample_unit": sample_unit,
         "final_estimator": final_estimator,
     }
 
@@ -536,6 +538,8 @@ def initialize_experiment_execution(
         "dataset_version": experiment.dataset_version,
         "pipeline_id": experiment.pipeline_id,
         "pipeline_version": pipeline_plugin.metadata.version,
+        "pipeline_source_repository": pipeline_plugin.metadata.source_repository,
+        "pipeline_source_revision": pipeline_plugin.metadata.source_revision,
         "pipeline_config": experiment.pipeline_config,
         "model_ids": experiment.model_ids,
         "model_parameters": experiment.model_parameters,
@@ -566,6 +570,8 @@ def initialize_experiment_execution(
         "dataset_version": experiment.dataset_version,
         "pipeline_id": experiment.pipeline_id,
         "pipeline_version": pipeline_plugin.metadata.version,
+        "pipeline_source_repository": parent_config["pipeline_source_repository"] or "",
+        "pipeline_source_revision": parent_config["pipeline_source_revision"] or "",
         "validation_strategy": experiment.validation_strategy,
         "primary_metric": experiment.primary_metric,
         "random_seed": experiment.random_seed,
@@ -703,6 +709,7 @@ def execute_candidate(
                 model_plugin.metadata.supports_probability,
                 evaluation_groups=prepared.get("evaluation_groups"),
                 evaluation_unit=prepared.get("evaluation_unit", "record"),
+                sample_unit=prepared.get("sample_unit", "sample"),
             )
             final_estimator = validation["final_estimator"]
             run.stage = "evaluate"
@@ -721,13 +728,13 @@ def execute_candidate(
                     run.metrics[f"cv_std_{metric_name}"] = values["std"]
 
             sample_result = None
-            if validation["evaluation_unit"] != "record":
+            secondary_prefix = validation["sample_unit"]
+            if validation["evaluation_unit"] != validation["sample_unit"]:
                 sample_result = evaluate_predictions(
                     validation["sample_y_true"],
                     validation["sample_predictions"],
                     validation["sample_probabilities"],
                 )
-                secondary_prefix = "epoch" if validation["evaluation_unit"] == "subject" else "sample"
                 for metric_name, value in sample_result["metrics"].items():
                     run.metrics[f"{secondary_prefix}_{metric_name}"] = value
             mlflow.log_params(
@@ -736,6 +743,7 @@ def execute_candidate(
                     "dataset_fingerprint": parent_config["dataset_fingerprint"],
                     "pipeline_id": experiment.pipeline_id,
                     "pipeline_version": pipeline_plugin.metadata.version,
+                    "pipeline_source_revision": parent_config["pipeline_source_revision"] or "",
                     "model_id": run.model_id,
                     "model_parameters": json.dumps(run.parameters, sort_keys=True),
                     "validation_strategy": experiment.validation_strategy,
@@ -757,6 +765,7 @@ def execute_candidate(
                 **parent_config,
                 "model_id": run.model_id,
                 "model_parameters": run.parameters,
+                "pipeline_runtime_summary": prepared.get("pipeline_runtime_summary", {}),
             }
             _write_json(model_dir / "configuration.json", complete_config)
             _write_json(
@@ -767,6 +776,7 @@ def execute_candidate(
                 model_dir / "validation_summary.json",
                 {
                     "evaluation_unit": validation["evaluation_unit"],
+                    "sample_unit": validation["sample_unit"],
                     "fold_count": len(validation["fold_metrics"]),
                     "global_metrics": result["metrics"],
                     "fold_summary": fold_summary,
@@ -776,6 +786,9 @@ def execute_candidate(
             _write_json(model_dir / "feature_names.json", prepared["feature_names"])
             _write_json(model_dir / "dataset_summary.json", dataset_summary)
             _write_json(model_dir / "environment.json", parent_config["dependency_versions"])
+            runtime_summary = prepared.get("pipeline_runtime_summary") or {}
+            if runtime_summary:
+                _write_json(model_dir / "pipeline_runtime_summary.json", runtime_summary)
             _plot_confusion(
                 model_dir / "confusion_matrix.png",
                 result["confusion_matrix"],
@@ -789,11 +802,11 @@ def execute_candidate(
             has_secondary_roc = False
             if sample_result is not None:
                 _write_json(
-                    model_dir / "epoch_classification_report.json",
+                    model_dir / f"{secondary_prefix}_classification_report.json",
                     sample_result["classification_report"],
                 )
                 _plot_confusion(
-                    model_dir / "epoch_confusion_matrix.png",
+                    model_dir / f"{secondary_prefix}_confusion_matrix.png",
                     sample_result["confusion_matrix"],
                     [
                         str(value)
@@ -801,7 +814,7 @@ def execute_candidate(
                     ],
                 )
                 has_secondary_roc = _plot_roc(
-                    model_dir / "epoch_roc_curve.png",
+                    model_dir / f"{secondary_prefix}_roc_curve.png",
                     validation["sample_y_true"],
                     validation["sample_probabilities"],
                 )
@@ -821,17 +834,19 @@ def execute_candidate(
                 ("environment.json", "environment"),
                 ("confusion_matrix.png", "plot"),
             ]
+            if runtime_summary:
+                artifact_specs.append(("pipeline_runtime_summary.json", "pipeline_runtime"))
             if has_roc_curve:
                 artifact_specs.append(("roc_curve.png", "plot"))
             if sample_result is not None:
                 artifact_specs.extend(
                     [
-                        ("epoch_classification_report.json", "report"),
-                        ("epoch_confusion_matrix.png", "plot"),
+                        (f"{secondary_prefix}_classification_report.json", "report"),
+                        (f"{secondary_prefix}_confusion_matrix.png", "plot"),
                     ]
                 )
                 if has_secondary_roc:
-                    artifact_specs.append(("epoch_roc_curve.png", "plot"))
+                    artifact_specs.append((f"{secondary_prefix}_roc_curve.png", "plot"))
             for artifact_name, kind in artifact_specs:
                 db.add(
                     ArtifactReference(

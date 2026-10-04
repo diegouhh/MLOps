@@ -15,6 +15,7 @@ from app.db.models import (
     RegisteredModelReference,
     TrainingRun,
 )
+from app.ml.pipelines.registry import pipeline_registry
 from app.services.datasets import get_dataset
 from app.services.experiments import get_experiment
 
@@ -130,7 +131,10 @@ def _bids_entities(relative_path: Path) -> dict[str, str | None]:
     }
 
 
-def _list_eeg_recordings(storage_path: str) -> list[dict[str, Any]]:
+def _list_eeg_recordings(
+    storage_path: str,
+    config: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     root = Path(storage_path).resolve()
     if not root.is_dir():
         return []
@@ -164,6 +168,17 @@ def _list_eeg_recordings(storage_path: str) -> list[dict[str, Any]]:
                 "run": entities["run"],
             }
         )
+    config = config or {}
+    allowed_tasks = {str(value) for value in config.get("tasks", []) if value}
+    if config.get("task"):
+        allowed_tasks.add(str(config["task"]))
+    allowed_sessions = {str(value) for value in config.get("sessions", []) if value}
+    if config.get("session"):
+        allowed_sessions.add(str(config["session"]))
+    if allowed_tasks:
+        recordings = [item for item in recordings if item["task"] in allowed_tasks]
+    if allowed_sessions:
+        recordings = [item for item in recordings if item["session"] in allowed_sessions]
     return recordings
 
 
@@ -172,6 +187,7 @@ def reference_input_schema(db: Session, reference: RegisteredModelReference) -> 
     dataset = get_dataset(db, experiment.dataset_id)
     current = _dataset_version(dataset, experiment.dataset_version)
     config = experiment.pipeline_config or {}
+    pipeline = pipeline_registry.get(experiment.pipeline_id)
 
     common = {
         "model_name": reference.name,
@@ -184,11 +200,16 @@ def reference_input_schema(db: Session, reference: RegisteredModelReference) -> 
         "dataset_version": experiment.dataset_version,
         "data_type": dataset.data_type,
         "pipeline_id": experiment.pipeline_id,
+        "pipeline_name": pipeline.metadata.display_name,
+        "pipeline_available": pipeline.metadata.available,
+        "pipeline_unavailable_reason": pipeline.metadata.unavailable_reason,
+        "pipeline_source_revision": pipeline.metadata.source_revision,
+        "processing_steps": pipeline.metadata.steps,
         "target_column": config.get("target_column"),
     }
 
     if dataset.data_type == "eeg_bids":
-        recordings = _list_eeg_recordings(current.storage_path)
+        recordings = _list_eeg_recordings(current.storage_path, config)
         return {
             **common,
             "input_mode": "eeg_recording",
@@ -197,8 +218,8 @@ def reference_input_schema(db: Session, reference: RegisteredModelReference) -> 
             "examples": [],
             "recordings": recordings,
             "help": (
-                "Selecciona un registro EEG. NeuroOps aplicará automáticamente el mismo "
-                "preprocesamiento y extracción de características usados durante el entrenamiento."
+                f"Selecciona un registro EEG. {pipeline.metadata.display_name} aplicará "
+                "la misma configuración usada durante el entrenamiento antes de predecir."
             ),
         }
 
@@ -248,12 +269,16 @@ def validate_prediction_records(
     records: list[dict[str, Any]],
 ) -> dict[str, Any]:
     schema = reference_input_schema(db, reference)
+    if not schema.get("pipeline_available", True):
+        raise ValidationError(
+            schema.get("pipeline_unavailable_reason") or "El pipeline del modelo no está disponible"
+        )
     if schema["input_mode"] == "eeg_recording":
         allowed = {item["value"] for item in schema["recordings"]}
         if not allowed:
             raise ValidationError(
-    "El dataset no contiene registros EEG disponibles para predicción"
-)
+                "El dataset no contiene registros EEG disponibles para predicción"
+            )
         for index, record in enumerate(records, start=1):
             if set(record) != {"recording"}:
                 raise ValidationError(

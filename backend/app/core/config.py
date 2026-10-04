@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     prefect_worker_health_url: str | None = None
     prefect_experiment_deployment: str = "NeuroOps experiment/neuroops-experiments"
     prefect_prediction_deployment: str = "NeuroOps prediction/neuroops-predictions"
+    prefect_applee_experiment_deployment: str = (
+        "NeuroOps experiment/neuroops-applee-experiments"
+    )
+    prefect_applee_prediction_deployment: str = (
+        "NeuroOps prediction/neuroops-applee-predictions"
+    )
     cors_origins: Annotated[list[str], NoDecode] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",

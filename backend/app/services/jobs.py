@@ -6,7 +6,7 @@ from prefect.client.orchestration import get_client
 from prefect.deployments import run_deployment
 from prefect.states import State, StateType
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.core.errors import ResourceNotFoundError, ValidationError
 from app.core.traceability import (
     experiment_run_name,
@@ -15,7 +15,27 @@ from app.core.traceability import (
 )
 from app.db.models import Experiment, PredictionJob, utcnow
 from app.db.session import get_session_factory
+from app.ml.pipelines.registry import pipeline_registry
 from app.services.registry import get_model_reference
+
+
+def _deployment_for(
+    settings: Settings,
+    *,
+    kind: str,
+    execution_profile: str,
+) -> str:
+    if execution_profile == "applee":
+        return (
+            settings.prefect_applee_experiment_deployment
+            if kind == "experiment"
+            else settings.prefect_applee_prediction_deployment
+        )
+    return (
+        settings.prefect_experiment_deployment
+        if kind == "experiment"
+        else settings.prefect_prediction_deployment
+    )
 
 
 async def _dispatch(
@@ -50,9 +70,15 @@ async def submit_experiment(experiment_id: str) -> str:
         if not experiment:
             raise ResourceNotFoundError("Experimento no encontrado")
         display_name = experiment_run_name(experiment.name, experiment.id)
+        profile = pipeline_registry.get(experiment.pipeline_id).metadata.execution_profile
+        deployment = _deployment_for(
+            settings,
+            kind="experiment",
+            execution_profile=profile,
+        )
 
     flow_run_id = await _dispatch(
-        settings.prefect_experiment_deployment,
+        deployment,
         "experiment_id",
         experiment_id,
         "experiment",
@@ -73,22 +99,31 @@ async def submit_prediction(job_id: str) -> str:
         job = session.get(PredictionJob, job_id)
         if not job:
             raise ResourceNotFoundError("Predicción no encontrada")
+        reference = get_model_reference(
+            session,
+            job.registered_model_name,
+            job.resolved_model_version or job.version_or_alias,
+        )
         if not job.resolved_model_version:
-            reference = get_model_reference(
-                session,
-                job.registered_model_name,
-                job.version_or_alias,
-            )
             job.resolved_model_version = reference.version
             session.commit()
+        experiment = session.get(Experiment, reference.experiment_id)
+        if not experiment:
+            raise ResourceNotFoundError("Experimento del modelo registrado no encontrado")
+        profile = pipeline_registry.get(experiment.pipeline_id).metadata.execution_profile
+        deployment = _deployment_for(
+            settings,
+            kind="prediction",
+            execution_profile=profile,
+        )
         display_name = prediction_run_name(
             job.registered_model_name,
-            job.resolved_model_version,
+            reference.version,
             job.id,
         )
 
     flow_run_id = await _dispatch(
-        settings.prefect_prediction_deployment,
+        deployment,
         "job_id",
         job_id,
         "prediction",

@@ -110,6 +110,7 @@ services:
       - -c
       - >-
         prefect work-pool create neuroops-process --type process --overwrite
+        && prefect work-pool create neuroops-applee --type process --overwrite
         && prefect deploy --all
     environment:
       PREFECT_API_URL: http://prefect:4200/api

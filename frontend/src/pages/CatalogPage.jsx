@@ -390,7 +390,7 @@ export default function CatalogPage({ type }) {
         </div>
         {!item.available && item.required_packages?.length > 0 && (
           <Text type="secondary" className="catalog-inline-note">
-            Faltan requisitos opcionales. Revisa los detalles para ver cuáles.
+            {item.unavailable_reason || 'Revisa los requisitos para habilitar este pipeline.'}
           </Text>
         )}
         <div className="catalog-actions catalog-actions-compact">
@@ -491,6 +491,11 @@ export default function CatalogPage({ type }) {
             { key: 'task', label: 'Tarea', children: labels(item.task_types, taskLabels).join(', ') || 'No declarada' },
             { key: 'version', label: 'Versión', children: item.version },
             { key: 'category', label: 'Categoría', children: item.category || 'Pipeline' },
+            ...(item.source_revision ? [{
+              key: 'source',
+              label: 'Revisión de origen',
+              children: <Text code>{item.source_revision.slice(0, 12)}</Text>,
+            }] : []),
           ]}
         />
         <div className="catalog-detail-section">

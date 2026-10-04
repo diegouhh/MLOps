@@ -25,7 +25,16 @@ export default function SchemaFields({ schema = {}, value = {}, onChange, column
           const current = value[name] === null ? '__null__' : value[name]
           field = <Select options={options} value={current} onChange={(next) => update(name, next === '__null__' ? null : next)} />
         } else if (type === 'array') {
-          field = <Select mode="tags" value={value[name] || []} onChange={(next) => update(name, next)} tokenSeparators={[',']} />
+          field = spec.items?.enum ? (
+            <Select
+              mode="multiple"
+              value={value[name] || []}
+              onChange={(next) => update(name, next)}
+              options={spec.items.enum.map((option) => ({ label: String(option), value: option }))}
+            />
+          ) : (
+            <Select mode="tags" value={value[name] || []} onChange={(next) => update(name, next)} tokenSeparators={[',']} />
+          )
         } else if (type === 'boolean') {
           field = <Switch checked={Boolean(value[name])} onChange={(next) => update(name, next)} />
         } else if (type === 'integer' || type === 'number') {

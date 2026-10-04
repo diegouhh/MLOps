@@ -182,7 +182,7 @@ export default function NewExperimentPage() {
           </Space>
         </>}
         {step === 4 && <>
-          <Title level={3}>Validación científica</Title>
+          <Title level={3}>Validación</Title>
           <Form layout="vertical">
             <Form.Item label="Estrategia"><Radio.Group value={validation.strategy} onChange={(event) => setValidation({ ...validation, strategy: event.target.value })}><Space direction="vertical"><Radio value="train_test_split" disabled={isEegPipeline}>Train/test estratificado</Radio><Radio value="stratified_kfold" disabled={isEegPipeline}>Stratified K-Fold</Radio><Radio value="group_kfold">Group K-Fold</Radio><Radio value="stratified_group_kfold">Stratified Group K-Fold</Radio></Space></Radio.Group></Form.Item>
             <Row gutter={16}>

@@ -9,10 +9,18 @@ from app.ml.pipelines.registry import pipeline_registry
 
 def test_pipeline_registry_discovers_core_and_optional_plugins():
     plugins = {plugin.metadata.id: plugin for plugin in pipeline_registry.list()}
-    assert set(plugins) == {"tabular_basic", "eeg_mne_basic", "sovaharmony_legacy"}
+    assert set(plugins) == {
+        "tabular_basic",
+        "eeg_mne_basic",
+        "applee",
+        "sovaharmony_legacy",
+    }
     assert plugins["tabular_basic"].metadata.available is True
     assert plugins["eeg_mne_basic"].metadata.available is True
     assert plugins["eeg_mne_basic"].metadata.required_packages == ["mne", "mne-bids"]
+    assert plugins["eeg_mne_basic"].metadata.prediction_mode == "epoch_aggregate"
+    assert plugins["applee"].metadata.execution_profile == "applee"
+    assert plugins["applee"].metadata.prediction_mode == "direct_record"
     assert plugins["sovaharmony_legacy"].metadata.available is False
     assert plugins["sovaharmony_legacy"].metadata.unavailable_reason
 

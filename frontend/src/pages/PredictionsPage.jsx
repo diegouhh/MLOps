@@ -5,7 +5,7 @@ import PageHeading from '../components/PageHeading'
 import StatusTag from '../components/StatusTag'
 import useResource from '../hooks/useResource'
 import { apiRequest, jsonOptions } from '../services/api'
-import { formatDate } from '../utils/format'
+import { formatDate, titleCase } from '../utils/format'
 import { mlflowTrackingUrl, prefectTrackingUrl } from '../utils/links'
 
 const { Paragraph, Text, Title } = Typography
@@ -29,12 +29,27 @@ function previewValue(value) {
 function resultSummary(job) {
   if (!job.result_payload) return null
   if (job.result_payload.mode === 'eeg_recording') {
-    return <Descriptions bordered size="small" column={1} items={[
-      { key: 'prediction', label: 'Predicción', children: <strong>{String(job.result_payload.prediction ?? 'Sin resultado')}</strong> },
-      { key: 'epochs', label: 'Épocas analizadas', children: job.result_payload.epochs_analyzed ?? '-' },
-      { key: 'distribution', label: 'Distribución', children: <Text className="mono">{JSON.stringify(job.result_payload.class_distribution || {})}</Text> },
-      ...(job.result_payload.mean_probabilities ? [{ key: 'probabilities', label: 'Probabilidad media', children: <Text className="mono">{JSON.stringify(job.result_payload.mean_probabilities)}</Text> }] : []),
-    ]} />
+    const payload = job.result_payload
+    const unitLabel = payload.analysis_unit === 'epoch'
+      ? 'Épocas analizadas'
+      : payload.units_analyzed === 1
+        ? 'Registro procesado'
+        : 'Filas de características procesadas'
+    const items = [
+      { key: 'prediction', label: 'Predicción', children: <strong>{String(payload.prediction ?? 'Sin resultado')}</strong> },
+      { key: 'pipeline', label: 'Pipeline', children: payload.pipeline_name || payload.pipeline_id || '-' },
+      { key: 'units', label: unitLabel, children: payload.units_analyzed ?? payload.epochs_analyzed ?? '-' },
+    ]
+    if (payload.class_distribution) {
+      items.push({ key: 'distribution', label: 'Distribución', children: <Text className="mono">{JSON.stringify(payload.class_distribution)}</Text> })
+    }
+    if (payload.probabilities) {
+      items.push({ key: 'probabilities', label: 'Probabilidades', children: <Text className="mono">{JSON.stringify(payload.probabilities)}</Text> })
+    }
+    if (payload.mean_probabilities) {
+      items.push({ key: 'mean_probabilities', label: 'Probabilidad media', children: <Text className="mono">{JSON.stringify(payload.mean_probabilities)}</Text> })
+    }
+    return <Descriptions bordered size="small" column={1} items={items} />
   }
   return <Descriptions bordered size="small" column={1} items={Object.entries(job.result_payload).map(([key, value]) => ({ key, label: key, children: <Text className="mono">{JSON.stringify(value)}</Text> }))} />
 }
@@ -243,8 +258,12 @@ export default function PredictionsPage() {
                 </Form>
                 <Card size="small" style={{ marginBottom: 16 }}>
                   <Space direction="vertical" size={4}>
-                    <Text type="secondary">NeuroOps hará automáticamente</Text>
-                    <Text>Filtrado, referencia, segmentación, extracción PSD y predicción con la versión fijada del modelo.</Text>
+                    <Text type="secondary">{schema.data.pipeline_name || 'Pipeline EEG'}</Text>
+                    <Text>
+                      {(schema.data.processing_steps || []).length
+                        ? schema.data.processing_steps.map(titleCase).join(' → ')
+                        : schema.data.help}
+                    </Text>
                   </Space>
                 </Card>
                 <Button type="primary" size="large" icon={<SendOutlined />} loading={saving} disabled={!readyToSubmit} block onClick={submit}>Ejecutar predicción EEG</Button>

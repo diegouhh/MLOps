@@ -30,3 +30,29 @@ deployments:
       work_queue_name: default
       job_variables:
         working_dir: /app
+
+  - name: neuroops-applee-experiments
+    version: "0.3.0"
+    tags: [neuroops, applee, training]
+    description: Ejecuta experimentos APPLEE en su worker aislado.
+    entrypoint: app/orchestration/flows.py:run_experiment_flow
+    parameters: {}
+    schedules: []
+    work_pool:
+      name: neuroops-applee
+      work_queue_name: default
+      job_variables:
+        working_dir: /app
+
+  - name: neuroops-applee-predictions
+    version: "0.3.0"
+    tags: [neuroops, applee, inference]
+    description: Ejecuta predicciones APPLEE en su worker aislado.
+    entrypoint: app/orchestration/flows.py:run_prediction_flow
+    parameters: {}
+    schedules: []
+    work_pool:
+      name: neuroops-applee
+      work_queue_name: default
+      job_variables:
+        working_dir: /app

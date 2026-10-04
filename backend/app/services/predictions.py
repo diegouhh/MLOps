@@ -93,6 +93,7 @@ def initialize_prediction_execution(
         raise ValidationError("La predicción ya terminó")
     reference = _resolve_reference(db, job)
     experiment, dataset, _version = _dataset_version(db, reference)
+    pipeline = pipeline_registry.get(experiment.pipeline_id)
     job.status = "running"
     job.error_message = None
     job.prefect_flow_run_id = prefect_flow_run_id or job.prefect_flow_run_id
@@ -116,6 +117,8 @@ def initialize_prediction_execution(
             "neuroops.model_version": reference.version,
             "neuroops.experiment_id": experiment.id,
             "neuroops.dataset_id": dataset.id,
+            "neuroops.pipeline_id": experiment.pipeline_id,
+            "neuroops.pipeline_source_revision": pipeline.metadata.source_revision or "",
         },
     )
     job.mlflow_run_id = active_run.info.run_id
@@ -128,6 +131,9 @@ def initialize_prediction_execution(
         "experiment_id": experiment.id,
         "dataset_id": dataset.id,
         "dataset_version": experiment.dataset_version,
+        "pipeline_id": experiment.pipeline_id,
+        "pipeline_version": pipeline.metadata.version,
+        "pipeline_source_revision": pipeline.metadata.source_revision or "",
         "record_count": len(job.input_payload),
     }.items():
         client.log_param(active_run.info.run_id, key, value)
@@ -196,6 +202,8 @@ def _aggregate_eeg_result(
         "epochs_analyzed": len(values),
         "class_distribution": {str(label): count for label, count in counts.items()},
         "aggregation": "majority_vote",
+        "analysis_unit": "epoch",
+        "units_analyzed": len(values),
     }
     if probabilities is not None and classes is not None:
         matrix = np.asarray(probabilities, dtype=float)
@@ -212,6 +220,47 @@ def _aggregate_eeg_result(
             result["mean_probabilities"] = {
                 str(label): float(score)
                 for label, score in zip(class_values, means, strict=False)
+            }
+    return result
+
+
+def _direct_eeg_result(
+    recording: str,
+    predictions: Any,
+    probabilities: Any,
+    classes: Any,
+) -> dict[str, Any]:
+    values = [_python_value(value) for value in np.asarray(predictions).tolist()]
+    if not values:
+        raise ValidationError("El registro EEG no produjo predicciones")
+    result: dict[str, Any] = {
+        "recording": recording,
+        "prediction": values[0],
+        "aggregation": "direct",
+        "analysis_unit": "feature_row",
+        "units_analyzed": len(values),
+    }
+    if len(values) > 1:
+        counts = Counter(values)
+        result["prediction"] = _python_value(counts.most_common(1)[0][0])
+        result["class_distribution"] = {
+            str(label): count for label, count in counts.items()
+        }
+    if probabilities is not None and classes is not None:
+        matrix = np.asarray(probabilities, dtype=float)
+        class_values = np.asarray(classes)
+        if (
+            matrix.ndim == 2
+            and matrix.shape[0] == len(values)
+            and matrix.shape[1] == len(class_values)
+        ):
+            scores = matrix[0] if len(values) == 1 else matrix.mean(axis=0)
+            result["prediction"] = _python_value(class_values[int(np.argmax(scores))])
+            result["aggregation"] = "direct" if len(values) == 1 else "mean_probability"
+            key = "probabilities" if len(values) == 1 else "mean_probabilities"
+            result[key] = {
+                str(label): float(score)
+                for label, score in zip(class_values, scores, strict=False)
             }
     return result
 
@@ -240,25 +289,39 @@ def _perform_eeg_prediction(
                 probabilities = model.predict_proba(frame)
             except (AttributeError, ValueError):
                 probabilities = None
+        result_builder = (
+            _aggregate_eeg_result
+            if pipeline.metadata.prediction_mode == "epoch_aggregate"
+            else _direct_eeg_result
+        )
         results.append(
-            _aggregate_eeg_result(
+            result_builder(
                 recording,
                 predictions,
                 probabilities,
                 getattr(model, "classes_", None),
             )
         )
-    payload: dict[str, Any] = {"mode": "eeg_recording", "results": results}
+    payload: dict[str, Any] = {
+        "mode": "eeg_recording",
+        "pipeline_id": experiment.pipeline_id,
+        "pipeline_name": pipeline.metadata.display_name,
+        "results": results,
+    }
     if len(results) == 1:
-        payload.update(
-            {
-                "prediction": results[0]["prediction"],
-                "epochs_analyzed": results[0]["epochs_analyzed"],
-                "class_distribution": results[0]["class_distribution"],
-            }
-        )
-        if "mean_probabilities" in results[0]:
-            payload["mean_probabilities"] = results[0]["mean_probabilities"]
+        first = results[0]
+        for key in (
+            "prediction",
+            "aggregation",
+            "analysis_unit",
+            "units_analyzed",
+            "epochs_analyzed",
+            "class_distribution",
+            "probabilities",
+            "mean_probabilities",
+        ):
+            if key in first:
+                payload[key] = first[key]
     return payload
 
 

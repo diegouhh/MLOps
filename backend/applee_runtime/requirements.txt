@@ -1,0 +1,23 @@
+# APPLEE runtime is intentionally isolated from the NeuroOps application environment.
+# The external repositories are pinned to the revisions referenced by GNACo/APPLEE.
+numpy==2.1.3
+pandas<2.3
+scipy<1.15
+matplotlib<3.11
+scikit-learn<1.7
+mne<1.10
+mne-bids==0.16.0
+pybids<0.20
+pyprep==0.4.3
+PyWavelets<2
+astropy<8
+statsmodels<1
+pyarrow<20
+openpyxl<4
+sovachronux @ git+https://gitfront.io/r/GRUNECO/4BjKkjJbDxf7/sovachronux.git@31d27aac25f255067c3d210f1a9f0c678a45b356
+sovaflow @ git+https://gitfront.io/r/GRUNECO/E827iy6c5ads/sovaflow.git@7c0bfe30389671843b2df9cf7aa4931889903703
+sovaharmony @ git+https://github.com/GRUNECO/eeg_harmonization.git@ff023b89bcafea5f2a30ea056c66b0d6037090eb
+sovareject @ git+https://gitfront.io/r/GRUNECO/8cVYUCpdJGJa/sovareject.git@0b2013b310abba3f444be86f23bf20778f85fad4
+sovawica @ git+https://github.com/GRUNECO/sovawica.git@362fed4f474870af39d3bf0f08e2c9d48eb21c6b
+APPLEE @ git+https://github.com/GNACo/APPLEE.git@5b554417070aed47fcd240b6923ada68f62db029
+yasa==0.6.5

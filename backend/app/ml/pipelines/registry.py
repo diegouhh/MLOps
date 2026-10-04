@@ -29,6 +29,7 @@ class PipelineRegistry:
         factories = {
             "tabular_basic": lambda: _tabular_pipeline(),
             "eeg_mne_basic": lambda: _eeg_pipeline(),
+            "applee": lambda: _applee_pipeline(),
             "sovaharmony_legacy": lambda: _sovaharmony_pipeline(),
         }
         if plugin_id not in factories:
@@ -54,6 +55,12 @@ def _eeg_pipeline() -> PipelinePlugin:
     return BasicEegMnePipeline()
 
 
+def _applee_pipeline() -> PipelinePlugin:
+    from app.ml.pipelines.applee import AppleEPipeline
+
+    return AppleEPipeline()
+
+
 def _sovaharmony_pipeline() -> PipelinePlugin:
     from app.ml.pipelines.sovaharmony import SovaharmonyPipeline
 
@@ -65,6 +72,7 @@ def register_builtin_pipelines() -> None:
         return
     pipeline_registry.register(_tabular_pipeline())
     pipeline_registry.register(_eeg_pipeline())
+    pipeline_registry.register(_applee_pipeline())
     pipeline_registry.register(_sovaharmony_pipeline())
 
 

@@ -22,6 +22,10 @@ class PipelineMetadata:
     task_types: list[str] = field(default_factory=list)
     input_label: str | None = None
     category: str | None = None
+    execution_profile: str = "default"
+    prediction_mode: Literal["direct_record", "epoch_aggregate"] = "direct_record"
+    source_repository: str | None = None
+    source_revision: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

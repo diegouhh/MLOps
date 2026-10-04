@@ -1,0 +1,65 @@
+services:
+  api:
+    environment:
+      NEUROOPS_APPLEE_ENABLED: "true"
+    depends_on:
+      prefect-worker-applee:
+        condition: service_healthy
+
+  prefect-worker-applee:
+    build:
+      context: ./backend
+      target: applee
+    command:
+      - prefect
+      - worker
+      - start
+      - --pool
+      - neuroops-applee
+      - --type
+      - process
+      - --limit
+      - "1"
+      - --name
+      - neuroops-applee-worker
+      - --with-healthcheck
+    environment:
+      NEUROOPS_ENVIRONMENT: development
+      NEUROOPS_DATABASE_URL: sqlite:////app/state/neuroops.db
+      NEUROOPS_MLFLOW_TRACKING_URI: http://mlflow:5000
+      NEUROOPS_MLFLOW_REGISTRY_URI: http://mlflow:5000
+      NEUROOPS_PREFECT_API_URL: http://prefect:4200/api
+      NEUROOPS_DATA_DIR: /app/data
+      NEUROOPS_MOUNTED_DATASETS_DIR: /datasets
+      NEUROOPS_ARTIFACTS_DIR: /app/artifacts
+      NEUROOPS_SOURCE_COMMIT: "${NEUROOPS_SOURCE_COMMIT:-}"
+      NEUROOPS_APPLEE_ENABLED: "true"
+      NEUROOPS_APPLEE_RUNTIME_PYTHON: /opt/applee-venv/bin/python
+      NEUROOPS_APPLEE_RUNNER: /app/applee_runtime/runner.py
+      NEUROOPS_APPLEE_WORK_DIR: /app/data/processed/applee-runtime
+      PREFECT_API_URL: http://prefect:4200/api
+      PREFECT_HOME: /app/state/prefect-applee-worker
+      MPLCONFIGDIR: /tmp/matplotlib
+      MLFLOW_DISABLE_TELEMETRY: "true"
+      DO_NOT_TRACK: "true"
+    volumes:
+      - api_state:/app/state
+      - neuroops_data:/app/data
+      - neuroops_artifacts:/app/artifacts
+      - ./datasets:/datasets:ro
+    depends_on:
+      init-volumes:
+        condition: service_completed_successfully
+      mlflow:
+        condition: service_healthy
+      prefect-bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"
+      interval: 10s
+      timeout: 3s
+      retries: 12
